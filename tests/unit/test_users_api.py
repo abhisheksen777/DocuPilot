@@ -1,0 +1,482 @@
+from fastapi.testclient import TestClient
+
+from paperwise.infrastructure.config import Settings
+from paperwise.server.dependencies import document_repository_dependency, settings_dependency
+from paperwise.server.main import app
+from paperwise.infrastructure.repositories.in_memory_document_repository import (
+    InMemoryDocumentRepository,
+)
+
+
+def test_create_list_get_user() -> None:
+    repository = InMemoryDocumentRepository()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/users",
+            json={
+                "email": "owner@example.com",
+                "full_name": "Owner One",
+                "password": "strong-pass-123",
+            },
+        )
+        assert create_response.status_code == 201
+        payload = create_response.json()
+        assert payload["email"] == "owner@example.com"
+        assert payload["full_name"] == "Owner One"
+        assert payload["is_active"] is True
+        assert "password_hash" not in payload
+
+        list_response = client.get("/users")
+        assert list_response.status_code == 200
+        list_payload = list_response.json()
+        assert len(list_payload) == 1
+        assert list_payload[0]["id"] == payload["id"]
+
+        get_response = client.get(f"/users/{payload['id']}")
+        assert get_response.status_code == 200
+        get_payload = get_response.json()
+        assert get_payload["email"] == "owner@example.com"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_create_user_rejects_duplicate_email() -> None:
+    repository = InMemoryDocumentRepository()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+
+    try:
+        client = TestClient(app)
+        payload = {
+            "email": "duplicate@example.com",
+            "full_name": "Owner One",
+            "password": "strong-pass-123",
+        }
+        first = client.post("/users", json=payload)
+        assert first.status_code == 201
+
+        second = client.post("/users", json=payload)
+        assert second.status_code == 400
+        assert second.json()["detail"] == "User with this email already exists"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_create_user_allowed_by_default_signup_config() -> None:
+    repository = InMemoryDocumentRepository()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[settings_dependency] = lambda: Settings()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/users",
+            json={
+                "email": "default-signup@example.com",
+                "full_name": "Default Signup",
+                "password": "strong-pass-123",
+            },
+        )
+
+        assert response.status_code == 201
+        assert response.json()["email"] == "default-signup@example.com"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_create_user_blocked_when_signup_disabled_but_login_still_works() -> None:
+    repository = InMemoryDocumentRepository()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+
+    try:
+        client = TestClient(app)
+        seed_response = client.post(
+            "/users",
+            json={
+                "email": "existing@example.com",
+                "full_name": "Existing User",
+                "password": "strong-pass-123",
+            },
+        )
+        assert seed_response.status_code == 201
+
+        app.dependency_overrides[settings_dependency] = lambda: Settings(disable_signup=True)
+        blocked_response = client.post(
+            "/users",
+            json={
+                "email": "blocked@example.com",
+                "full_name": "Blocked Signup",
+                "password": "strong-pass-123",
+            },
+        )
+        assert blocked_response.status_code == 403
+        assert blocked_response.json()["detail"] == "Public signup is disabled."
+
+        login_response = client.post(
+            "/users/login",
+            json={"email": "existing@example.com", "password": "strong-pass-123"},
+        )
+        assert login_response.status_code == 200
+        assert login_response.json()["user"]["email"] == "existing@example.com"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_login_user_success_and_failure() -> None:
+    repository = InMemoryDocumentRepository()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/users",
+            json={
+                "email": "login@example.com",
+                "full_name": "Login User",
+                "password": "strong-pass-123",
+            },
+        )
+        assert create_response.status_code == 201
+
+        bad_login = client.post(
+            "/users/login",
+            json={"email": "login@example.com", "password": "wrong"},
+        )
+        assert bad_login.status_code == 401
+
+        good_login = client.post(
+            "/users/login",
+            json={"email": "LOGIN@example.com", "password": "strong-pass-123"},
+        )
+        assert good_login.status_code == 200
+        login_payload = good_login.json()
+        assert set(login_payload) == {"user"}
+        assert login_payload["user"]["email"] == "login@example.com"
+        assert good_login.cookies.get("paperwise_session")
+
+        me_response = client.get("/users/me")
+        assert me_response.status_code == 200
+        assert me_response.json()["email"] == "login@example.com"
+
+        machine_client = TestClient(app)
+        assert machine_client.get("/users/me").status_code == 401
+
+        logout_response = client.post("/users/logout")
+        assert logout_response.status_code == 204
+        assert logout_response.headers["set-cookie"].startswith("paperwise_session=\"\";")
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_login_cookie_secure_flag_defaults_to_http_friendly_docker() -> None:
+    repository = InMemoryDocumentRepository()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[settings_dependency] = lambda: Settings(env="docker")
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/users",
+            json={
+                "email": "docker-login@example.com",
+                "full_name": "Docker Login",
+                "password": "strong-pass-123",
+            },
+        )
+        assert create_response.status_code == 201
+
+        login_response = client.post(
+            "/users/login",
+            json={"email": "docker-login@example.com", "password": "strong-pass-123"},
+        )
+        assert login_response.status_code == 200
+        assert "secure" not in login_response.headers["set-cookie"].lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_login_cookie_secure_flag_can_be_enabled_for_https() -> None:
+    repository = InMemoryDocumentRepository()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[settings_dependency] = lambda: Settings(
+        env="docker",
+        session_cookie_secure=True,
+    )
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/users",
+            json={
+                "email": "https-login@example.com",
+                "full_name": "HTTPS Login",
+                "password": "strong-pass-123",
+            },
+        )
+        assert create_response.status_code == 201
+
+        login_response = client.post(
+            "/users/login",
+            json={"email": "https-login@example.com", "password": "strong-pass-123"},
+        )
+        assert login_response.status_code == 200
+        assert "secure" in login_response.headers["set-cookie"].lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_change_password_success_and_requires_current_password() -> None:
+    repository = InMemoryDocumentRepository()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/users",
+            json={
+                "email": "password@example.com",
+                "full_name": "Password User",
+                "password": "strong-pass-123",
+            },
+        )
+        assert create_response.status_code == 201
+
+        login_response = client.post(
+            "/users/login",
+            json={"email": "password@example.com", "password": "strong-pass-123"},
+        )
+        assert login_response.status_code == 200
+        bad_change = client.post(
+            "/users/me/password",
+            json={
+                "current_password": "wrong-pass",
+                "new_password": "new-pass-123",
+            },
+        )
+        assert bad_change.status_code == 400
+        assert bad_change.json()["detail"] == "Current password is incorrect"
+
+        change_response = client.post(
+            "/users/me/password",
+            json={
+                "current_password": "strong-pass-123",
+                "new_password": "new-pass-123",
+            },
+        )
+        assert change_response.status_code == 200
+        assert change_response.json()["message"] == "Password updated successfully."
+
+        old_login = client.post(
+            "/users/login",
+            json={"email": "password@example.com", "password": "strong-pass-123"},
+        )
+        assert old_login.status_code == 401
+
+        new_login = client.post(
+            "/users/login",
+            json={"email": "password@example.com", "password": "new-pass-123"},
+        )
+        assert new_login.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_user_preferences_round_trip() -> None:
+    repository = InMemoryDocumentRepository()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/users",
+            json={
+                "email": "prefs@example.com",
+                "full_name": "Prefs User",
+                "password": "strong-pass-123",
+            },
+        )
+        assert create_response.status_code == 201
+
+        login_response = client.post(
+            "/users/login",
+            json={"email": "prefs@example.com", "password": "strong-pass-123"},
+        )
+        assert login_response.status_code == 200
+        get_empty = client.get("/users/me/preferences")
+        assert get_empty.status_code == 200
+        empty_preferences = get_empty.json()["preferences"]
+        assert empty_preferences["llm_connections"] == []
+        assert empty_preferences["llm_routing"]["ocr"]["engine"] == "llm"
+        assert TestClient(app).get("/users/me/preferences").status_code == 401
+
+        put_response = client.put(
+            "/users/me/preferences",
+            json={
+                "preferences": {
+                    "last_view": "section-tags",
+                    "ui_theme": "ledger",
+                    "docs_page_size": 50,
+                    "grounded_qa_top_k_chunks": 24,
+                    "grounded_qa_max_documents": 9,
+                    "llm_provider": "openai",
+                    "llm_model": "gpt-4.1-mini",
+                    "llm_base_url": "https://api.openai.com/v1",
+                    "llm_api_key": "sk-test",
+                    "ocr_provider": "llm_separate",
+                    "ocr_auto_switch": True,
+                    "ocr_llm_provider": "gemini",
+                    "ocr_llm_model": "gemini-2.5-flash",
+                    "ocr_llm_base_url": "https://generativelanguage.googleapis.com/v1beta",
+                    "ocr_llm_api_key": "gk-test",
+                    "docs_filters": {
+                        "tag": ["Credit"],
+                        "correspondent": [],
+                        "document_type": [],
+                        "status": ["ready"],
+                    },
+                }
+            },
+        )
+        assert put_response.status_code == 200
+        assert put_response.json()["preferences"]["last_view"] == "section-tags"
+        assert put_response.json()["preferences"]["ui_theme"] == "ledger"
+        assert put_response.json()["preferences"]["docs_page_size"] == 50
+        assert put_response.json()["preferences"]["grounded_qa_top_k_chunks"] == 24
+        assert put_response.json()["preferences"]["grounded_qa_max_documents"] == 9
+        assert put_response.json()["preferences"]["llm_provider"] == "openai"
+        assert put_response.json()["preferences"]["llm_model"] == "gpt-4.1-mini"
+        assert put_response.json()["preferences"]["ocr_provider"] == "llm_separate"
+        assert put_response.json()["preferences"]["ocr_auto_switch"] is True
+        assert put_response.json()["preferences"]["ocr_llm_provider"] == "gemini"
+        assert put_response.json()["preferences"]["ocr_llm_model"] == "gemini-2.5-flash"
+        assert put_response.json()["preferences"]["llm_connections"] == [
+            {
+                "id": "default-connection",
+                "name": "Primary Connection",
+                "provider": "openai",
+                "base_url": "https://api.openai.com/v1",
+                "api_key": "sk-test",
+                "default_model": "gpt-4.1-mini",
+            },
+            {
+                "id": "ocr-connection",
+                "name": "OCR Connection",
+                "provider": "gemini",
+                "base_url": "https://generativelanguage.googleapis.com/v1beta",
+                "api_key": "gk-test",
+                "default_model": "gemini-2.5-flash",
+            },
+        ]
+        assert put_response.json()["preferences"]["llm_routing"]["metadata"] == {
+            "connection_id": "default-connection",
+            "model": "gpt-4.1-mini",
+        }
+        assert put_response.json()["preferences"]["llm_routing"]["ocr"] == {
+            "engine": "llm",
+            "connection_id": "ocr-connection",
+            "model": "gemini-2.5-flash",
+        }
+
+        get_saved = client.get("/users/me/preferences")
+        assert get_saved.status_code == 200
+        assert get_saved.json()["preferences"]["last_view"] == "section-tags"
+        assert get_saved.json()["preferences"]["ui_theme"] == "ledger"
+        assert get_saved.json()["preferences"]["docs_page_size"] == 50
+        assert get_saved.json()["preferences"]["grounded_qa_top_k_chunks"] == 24
+        assert get_saved.json()["preferences"]["grounded_qa_max_documents"] == 9
+        assert get_saved.json()["preferences"]["llm_provider"] == "openai"
+        assert get_saved.json()["preferences"]["llm_model"] == "gpt-4.1-mini"
+        assert get_saved.json()["preferences"]["ocr_provider"] == "llm_separate"
+        assert get_saved.json()["preferences"]["ocr_auto_switch"] is True
+        assert get_saved.json()["preferences"]["ocr_llm_provider"] == "gemini"
+        assert get_saved.json()["preferences"]["ocr_llm_model"] == "gemini-2.5-flash"
+        assert get_saved.json()["preferences"]["llm_connections"][0]["id"] == "default-connection"
+        assert get_saved.json()["preferences"]["llm_routing"]["grounded_qa"] == {
+            "connection_id": "default-connection",
+            "model": "gpt-4.1-mini",
+        }
+        assert get_saved.json()["preferences"]["docs_filters"]["tag"] == ["Credit"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_user_preferences_put_merges_without_dropping_existing_keys() -> None:
+    repository = InMemoryDocumentRepository()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/users",
+            json={
+                "email": "prefs-merge@example.com",
+                "full_name": "Prefs Merge",
+                "password": "strong-pass-123",
+            },
+        )
+        assert create_response.status_code == 201
+
+        login_response = client.post(
+            "/users/login",
+            json={"email": "prefs-merge@example.com", "password": "strong-pass-123"},
+        )
+        assert login_response.status_code == 200
+        seed_response = client.put(
+            "/users/me/preferences",
+            json={"preferences": {"llm_total_tokens_processed": 1234}},
+        )
+        assert seed_response.status_code == 200
+        assert seed_response.json()["preferences"]["llm_total_tokens_processed"] == 1234
+
+        update_response = client.put(
+            "/users/me/preferences",
+            json={"preferences": {"last_view": "section-settings"}},
+        )
+        assert update_response.status_code == 200
+        payload = update_response.json()["preferences"]
+        assert payload["last_view"] == "section-settings"
+        assert payload["llm_total_tokens_processed"] == 1234
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_user_preferences_rejects_openai_style_key_for_gemini() -> None:
+    repository = InMemoryDocumentRepository()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/users",
+            json={
+                "email": "prefs-gemini@example.com",
+                "full_name": "Prefs Gemini",
+                "password": "strong-pass-123",
+            },
+        )
+        assert create_response.status_code == 201
+
+        login_response = client.post(
+            "/users/login",
+            json={"email": "prefs-gemini@example.com", "password": "strong-pass-123"},
+        )
+        assert login_response.status_code == 200
+        put_response = client.put(
+            "/users/me/preferences",
+            json={
+                "preferences": {
+                    "ocr_provider": "llm_separate",
+                    "ocr_llm_provider": "gemini",
+                    "ocr_llm_model": "gemini-2.5-flash",
+                    "ocr_llm_api_key": "sk-test",
+                }
+            },
+        )
+        assert put_response.status_code == 400
+        assert put_response.json()["detail"] == (
+            "Gemini API keys should not start with sk-. Paste your Google AI Studio API key."
+        )
+    finally:
+        app.dependency_overrides.clear()

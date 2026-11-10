@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=69.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paperwise"
+version = "0.10.0"
+description = "AI-native document management platform"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "celery>=5.4.0",
+  "fastapi>=0.115.0",
+  "google-genai>=1.15.0",
+  "httpx>=0.27.0",
+  "jinja2>=3.1.0",
+  "pypdf>=5.4.0",
+  "psycopg[binary]>=3.2.0",
+  "pydantic>=2.9.0",
+  "pydantic-settings>=2.5.0",
+  "python-multipart>=0.0.12",
+  "redis>=5.1.0",
+  "sqlalchemy>=2.0.35",
+  "uvicorn[standard]>=0.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "ruff>=0.6.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+paperwise = [
+  "server/static/*.html",
+  "server/static/css/*",
+  "server/static/icons/*",
+  "server/static/js/*",
+  "server/static/js/chat/*",
+  "server/static/js/search/*",
+  "server/static/js/state/*",
+  "server/static/js/ui/*",
+  "server/static/vendor/pdfjs/*",
+  "server/static/vendor/pdfjs/cmaps/*",
+  "server/static/vendor/pdfjs/iccs/*",
+  "server/static/vendor/pdfjs/image_decoders/*",
+  "server/static/vendor/pdfjs/standard_fonts/*",
+  "server/static/vendor/pdfjs/wasm/*",
+  "server/templates/ui/*.html",
+  "server/templates/ui/fragments/*.html",
+  "server/templates/ui/partials/*.html",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

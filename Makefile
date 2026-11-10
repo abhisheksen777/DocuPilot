@@ -1,0 +1,157 @@
+VENV ?= .venv
+PYTHON ?= python3.13
+VENV_PYTHON = $(VENV)/bin/python
+RUN_DIR ?= .run
+LOG_DIR ?= .logs
+BACKEND_PID_FILE ?= $(RUN_DIR)/backend.pid
+WORKER_PID_FILE ?= $(RUN_DIR)/worker.pid
+BACKEND_LOG ?= $(LOG_DIR)/backend.log
+WORKER_LOG ?= $(LOG_DIR)/worker.log
+WEBSITE_PORT ?= 8081
+API_HOST ?= 0.0.0.0
+API_PORT ?= 8000
+WORKER_CONCURRENCY_ARG = $(if $(PAPERWISE_WORKER_CONCURRENCY),--concurrency=$(PAPERWISE_WORKER_CONCURRENCY),)
+
+.PHONY: setup deps-up deps-down docker-up docker-down docker-logs docker-deploy-up docker-deploy-down docker-deploy-logs backend api worker worker-bg backend-bg website dev-up dev-stop dev-restart dev-status test smoke-llm version-check
+
+setup:
+	$(PYTHON) -m venv $(VENV)
+	$(VENV_PYTHON) -m pip install --upgrade pip
+	$(VENV_PYTHON) -m pip install -e .[dev]
+
+deps-up:
+	@redis_owner="$$(docker ps --filter publish=6379 --format '{{.Names}}' | head -n 1)"; \
+	if [ -n "$$redis_owner" ]; then \
+		echo "redis already available on host port 6379 via $$redis_owner; reusing it"; \
+	elif command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:6379 -sTCP:LISTEN >/dev/null 2>&1; then \
+		echo "redis already listening on host port 6379; reusing it"; \
+	else \
+		docker compose up -d redis; \
+	fi
+	@postgres_owner="$$(docker ps --filter publish=5432 --format '{{.Names}}' | head -n 1)"; \
+	if [ -n "$$postgres_owner" ]; then \
+		echo "postgres already available on host port 5432 via $$postgres_owner; reusing it"; \
+	elif command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:5432 -sTCP:LISTEN >/dev/null 2>&1; then \
+		echo "postgres already listening on host port 5432; reusing it"; \
+	else \
+		docker compose up -d postgres; \
+	fi
+
+deps-down:
+	docker compose stop redis postgres
+
+docker-up:
+	docker compose up -d --build
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f api worker
+
+docker-deploy-up:
+	docker compose -f docker-compose.deploy.yml up -d
+
+docker-deploy-down:
+	docker compose -f docker-compose.deploy.yml down
+
+docker-deploy-logs:
+	docker compose -f docker-compose.deploy.yml logs -f api worker
+
+backend:
+	$(VENV_PYTHON) -m uvicorn paperwise.server.main:app --reload --host $(API_HOST) --port $(API_PORT)
+
+api: backend
+
+worker:
+	$(VENV_PYTHON) -m celery -A paperwise.workers.celery_app.celery_app worker --loglevel=INFO $(WORKER_CONCURRENCY_ARG)
+
+website:
+	cd website && $(PYTHON) -m http.server $(WEBSITE_PORT)
+
+backend-bg:
+	@mkdir -p $(RUN_DIR) $(LOG_DIR)
+	@if [ -f "$(BACKEND_PID_FILE)" ] && kill -0 "$$(cat "$(BACKEND_PID_FILE)")" 2>/dev/null; then \
+		echo "backend already running (pid=$$(cat "$(BACKEND_PID_FILE)"))"; \
+	else \
+		rm -f "$(BACKEND_PID_FILE)"; \
+		echo "starting backend on $(API_HOST):$(API_PORT)..."; \
+		nohup $(VENV_PYTHON) -m uvicorn paperwise.server.main:app --reload --host $(API_HOST) --port $(API_PORT) > "$(BACKEND_LOG)" 2>&1 & echo $$! > "$(BACKEND_PID_FILE)"; \
+		echo "backend started (pid=$$(cat "$(BACKEND_PID_FILE)")) bind=$(API_HOST):$(API_PORT) log=$(BACKEND_LOG)"; \
+	fi
+
+worker-bg:
+	@mkdir -p $(RUN_DIR) $(LOG_DIR)
+	@if [ -f "$(WORKER_PID_FILE)" ] && kill -0 "$$(cat "$(WORKER_PID_FILE)")" 2>/dev/null; then \
+		echo "worker already running (pid=$$(cat "$(WORKER_PID_FILE)"))"; \
+	else \
+		rm -f "$(WORKER_PID_FILE)"; \
+		echo "starting worker..."; \
+		nohup sh -c '$(VENV_PYTHON) -m celery -A paperwise.workers.celery_app.celery_app worker --loglevel=INFO $(WORKER_CONCURRENCY_ARG)' > "$(WORKER_LOG)" 2>&1 & echo $$! > "$(WORKER_PID_FILE)"; \
+		echo "worker started (pid=$$(cat "$(WORKER_PID_FILE)")) log=$(WORKER_LOG)"; \
+	fi
+
+dev-up: deps-up backend-bg worker-bg
+
+dev-stop:
+	@if [ -f "$(BACKEND_PID_FILE)" ]; then \
+		pid="$$(cat "$(BACKEND_PID_FILE)")"; \
+		if kill -0 "$$pid" 2>/dev/null; then \
+			echo "stopping backend (pid=$$pid)..."; \
+			pkill -TERM -P "$$pid" 2>/dev/null || true; \
+			kill "$$pid" 2>/dev/null || true; \
+		fi; \
+		rm -f "$(BACKEND_PID_FILE)"; \
+	fi
+	@for pid in $$(pgrep -f "uvicorn paperwise.server.main:app.*--port $(API_PORT)" 2>/dev/null || true); do \
+		if [ "$$pid" != "$$$$" ]; then \
+			echo "stopping stale backend uvicorn (pid=$$pid)..."; \
+			pkill -TERM -P "$$pid" 2>/dev/null || true; \
+			kill "$$pid" 2>/dev/null || true; \
+		fi; \
+	done
+	@if [ -f "$(WORKER_PID_FILE)" ]; then \
+		pid="$$(cat "$(WORKER_PID_FILE)")"; \
+		if kill -0 "$$pid" 2>/dev/null; then \
+			echo "stopping worker (pid=$$pid)..."; \
+			kill "$$pid" 2>/dev/null || true; \
+		fi; \
+		rm -f "$(WORKER_PID_FILE)"; \
+	fi
+
+dev-restart: dev-stop dev-up
+
+dev-status:
+	@echo "== Backend =="
+	@if [ -f "$(BACKEND_PID_FILE)" ]; then \
+		pid="$$(cat "$(BACKEND_PID_FILE)")"; \
+		if kill -0 "$$pid" 2>/dev/null; then \
+			echo "running (pid=$$pid) bind=$(API_HOST):$(API_PORT) log=$(BACKEND_LOG)"; \
+		else \
+			echo "not running (stale pid file: $$pid)"; \
+		fi; \
+	else \
+		echo "not running"; \
+	fi
+	@echo "== Worker =="
+	@if [ -f "$(WORKER_PID_FILE)" ]; then \
+		pid="$$(cat "$(WORKER_PID_FILE)")"; \
+		if kill -0 "$$pid" 2>/dev/null; then \
+			echo "running (pid=$$pid) log=$(WORKER_LOG)"; \
+		else \
+			echo "not running (stale pid file: $$pid)"; \
+		fi; \
+	else \
+		echo "not running"; \
+	fi
+	@echo "== Dependencies (docker compose) =="
+	@docker compose ps redis postgres
+
+test:
+	$(VENV_PYTHON) -m pytest
+
+smoke-llm:
+	$(VENV_PYTHON) tools/smoke_llm.py
+
+version-check:
+	python3 tools/check_version_consistency.py

@@ -1,0 +1,179 @@
+from dataclasses import dataclass
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
+
+
+class DocumentStatus(StrEnum):
+    RECEIVED = "received"
+    PROCESSING = "processing"
+    FAILED = "failed"
+    READY = "ready"
+
+
+class DocumentIndexStatus(StrEnum):
+    PENDING = "pending"
+    INDEXING = "indexing"
+    READY = "ready"
+    STALE = "stale"
+    FAILED = "failed"
+
+
+class HistoryEventType(StrEnum):
+    METADATA_CHANGED = "metadata_changed"
+    TAGS_ADDED = "tags_added"
+    TAGS_REMOVED = "tags_removed"
+    FILE_MOVED = "file_moved"
+    PROCESSING_RESTARTED = "processing_restarted"
+    PROCESSING_COMPLETED = "processing_completed"
+    PROCESSING_FAILED = "processing_failed"
+
+
+class HistoryActorType(StrEnum):
+    USER = "user"
+    SYSTEM = "system"
+
+
+@dataclass(slots=True)
+class Document:
+    id: str
+    filename: str
+    owner_id: str
+    blob_uri: str
+    checksum_sha256: str
+    content_type: str
+    size_bytes: int
+    status: DocumentStatus
+    created_at: datetime
+    starred: bool = False
+
+
+@dataclass(slots=True)
+class ParseResult:
+    document_id: str
+    parser: str
+    status: str
+    size_bytes: int
+    page_count: int
+    text_preview: str
+    created_at: datetime
+    ocr_details: dict[str, Any] | None = None
+    full_text: str | None = None
+
+
+@dataclass(slots=True)
+class LLMParseResult:
+    document_id: str
+    suggested_title: str
+    document_date: str | None
+    correspondent: str
+    document_type: str
+    tags: list[str]
+    created_correspondent: bool
+    created_document_type: bool
+    created_tags: list[str]
+    created_at: datetime
+    llm_total_tokens: int = 0
+    llm_details: dict[str, Any] | None = None
+
+
+@dataclass(slots=True)
+class DocumentHistoryEvent:
+    id: str
+    document_id: str
+    event_type: HistoryEventType
+    actor_type: HistoryActorType
+    actor_id: str | None
+    source: str
+    changes: dict[str, Any]
+    created_at: datetime
+
+
+@dataclass(slots=True)
+class User:
+    id: str
+    email: str
+    full_name: str
+    password_hash: str
+    is_active: bool
+    created_at: datetime
+
+
+@dataclass(slots=True)
+class UserPreference:
+    user_id: str
+    preferences: dict[str, Any]
+
+
+@dataclass(slots=True)
+class ChatThread:
+    id: str
+    owner_id: str
+    title: str
+    messages: list[dict[str, Any]]
+    token_usage: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(slots=True)
+class ChatThreadDocumentReference:
+    thread_id: str
+    owner_id: str
+    document_id: str
+    title: str
+    message_count: int
+    reference_count: int
+    question: str
+    source_titles: list[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(slots=True)
+class Collection:
+    id: str
+    owner_id: str
+    name: str
+    description: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(slots=True)
+class DocumentSearchHit:
+    document: Document
+    score: float
+    snippet: str
+    matched_terms: list[str]
+
+
+@dataclass(slots=True)
+class DocumentChunk:
+    id: str
+    document_id: str
+    owner_id: str
+    chunk_index: int
+    content: str
+    token_count: int
+    created_at: datetime
+
+
+@dataclass(slots=True)
+class DocumentChunkSearchHit:
+    chunk: DocumentChunk
+    score: float
+    matched_terms: list[str]
+
+
+@dataclass(slots=True)
+class DocumentIndexState:
+    document_id: str
+    owner_id: str
+    status: DocumentIndexStatus
+    index_version: str
+    source_checksum: str
+    chunk_count: int
+    updated_at: datetime
+    indexed_at: datetime | None = None
+    last_error: str | None = None

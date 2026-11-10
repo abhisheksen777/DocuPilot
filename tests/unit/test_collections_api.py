@@ -1,0 +1,1402 @@
+from datetime import UTC, datetime
+import logging
+
+from fastapi.testclient import TestClient
+
+from paperwise.application.services.chunk_indexing import index_document_chunks
+from paperwise.application.services.chat_contexts import compact_chat_context_content
+from paperwise.application.services.document_scope import all_owned_document_ids
+from paperwise.application.services.grounded_qa import build_qa_contexts
+from paperwise.domain.models import (
+    Document,
+    DocumentChunk,
+    DocumentChunkSearchHit,
+    DocumentStatus,
+    LLMParseResult,
+    ParseResult,
+    User,
+    UserPreference,
+)
+from paperwise.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
+from paperwise.server.dependencies import (
+    current_user_dependency,
+    document_repository_dependency,
+    llm_provider_dependency,
+)
+from paperwise.server.main import app
+
+
+TEST_USER = User(
+    id="user-123",
+    email="user-123@example.com",
+    full_name="User Test",
+    password_hash="pbkdf2_sha256$1$aa$bb",
+    is_active=True,
+    created_at=datetime.now(UTC),
+)
+
+
+class FakeGroundedLLM:
+    def answer_grounded(self, *, question: str, contexts: list[dict]) -> dict:
+        del question
+        first = contexts[0] if contexts else {}
+        return {
+            "answer": "Grounded answer from context.",
+            "insufficient_evidence": False,
+            "citations": [
+                {
+                    "chunk_id": first.get("chunk_id", ""),
+                    "document_id": first.get("document_id", ""),
+                    "title": first.get("title", ""),
+                    "quote": str(first.get("content", ""))[:120],
+                }
+            ],
+        }
+
+    def suggest_metadata(self, **kwargs):  # pragma: no cover - unused in this test
+        raise RuntimeError("unused")
+
+    def extract_ocr_text(self, **kwargs):  # pragma: no cover - unused in this test
+        raise RuntimeError("unused")
+
+    def rewrite_retrieval_queries(self, *, question: str) -> dict:
+        return {
+            "queries": [question],
+            "must_terms": [],
+            "optional_terms": [],
+        }
+
+
+def test_compact_chat_context_keeps_query_centered_excerpt() -> None:
+    content = "intro " * 500 + "Height 2 ft 10 in recorded at the visit. " + "footer " * 500
+
+    excerpt, truncated = compact_chat_context_content(content, "Quincy height")
+
+    assert truncated is True
+    assert len(excerpt) < len(content)
+    assert "Height 2 ft 10 in" in excerpt
+    assert excerpt.startswith("...")
+    assert excerpt.endswith("...")
+
+
+def test_all_owned_document_ids_batches_past_first_page() -> None:
+    repository = InMemoryDocumentRepository()
+    now = datetime.now(UTC)
+    for index in range(1005):
+        repository.save(
+            Document(
+                id=f"doc-{index}",
+                filename=f"doc-{index}.pdf",
+                owner_id=TEST_USER.id,
+                blob_uri=f"processed/doc-{index}.pdf",
+                checksum_sha256=f"sha-{index}",
+                content_type="application/pdf",
+                size_bytes=100,
+                status=DocumentStatus.READY,
+                created_at=now,
+            )
+        )
+    repository.save(
+        Document(
+            id="other-owner-doc",
+            filename="other.pdf",
+            owner_id="other-user",
+            blob_uri="processed/other.pdf",
+            checksum_sha256="sha-other",
+            content_type="application/pdf",
+            size_bytes=100,
+            status=DocumentStatus.READY,
+            created_at=now,
+        )
+    )
+
+    document_ids = all_owned_document_ids(repository, TEST_USER)
+
+    assert len(document_ids) == 1005
+    assert "doc-1004" in document_ids
+    assert "other-owner-doc" not in document_ids
+
+
+class FakeAnchoredGroundedLLM(FakeGroundedLLM):
+    def rewrite_retrieval_queries(self, *, question: str) -> dict:
+        del question
+        return {
+            "queries": ["Quincy height measurement history"],
+            "must_terms": ["Quincy", "height", "measurements"],
+            "anchor_terms": ["Quincy", "height"],
+            "optional_terms": ["cm", "inches"],
+        }
+
+
+class FakeMassRewriteGroundedLLM(FakeGroundedLLM):
+    def rewrite_retrieval_queries(self, *, question: str) -> dict:
+        del question
+        return {
+            "queries": ["Quincy weight vital signs", "Quincy body weight lb kg"],
+            "must_terms": ["weight"],
+            "anchor_terms": ["Quincy", "weight"],
+            "optional_terms": ["lb", "kg", "vital signs"],
+        }
+
+
+class FakeSonicRewriteGroundedLLM(FakeGroundedLLM):
+    def rewrite_retrieval_queries(self, *, question: str) -> dict:
+        del question
+        return {
+            "queries": [
+                "monthly spending on Sonic internet",
+                "Sonic internet monthly bill amount",
+            ],
+            "must_terms": ["Sonic internet", "monthly", "spend"],
+            "anchor_terms": ["Sonic internet", "Sonic"],
+            "optional_terms": ["cost", "bill", "charges", "payment", "per month", "monthly fee"],
+        }
+
+
+class FakeTimeoutGroundedLLM(FakeGroundedLLM):
+    def answer_grounded(self, *, question: str, contexts: list[dict]) -> dict:
+        del question
+        del contexts
+        raise RuntimeError("The read operation timed out")
+
+
+class FakeToolChatLLM(FakeGroundedLLM):
+    def __init__(self) -> None:
+        self.calls = 0
+        self.first_messages: list[dict] | None = None
+
+    def answer_with_tools(self, *, messages: list[dict], tools: list[dict]) -> dict:
+        del tools
+        self.calls += 1
+        if self.calls == 1:
+            self.first_messages = [dict(message) for message in messages]
+        if self.calls == 1:
+            return {
+                "role": "assistant",
+                "content": "",
+                "llm_total_tokens": 11,
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "name": "search_document_chunks",
+                        "arguments": '{"query":"Sonic internet amount","tags":["Utilities"],"limit":5}',
+                    }
+                ],
+            }
+        tool_payload = {}
+        for message in messages:
+            if message.get("role") == "tool":
+                import json
+
+                tool_payload = json.loads(message.get("content", "{}"))
+        results = tool_payload.get("results", [])
+        title = results[0].get("title", "the document") if results else "the document"
+        return {
+            "role": "assistant",
+            "content": f"Sonic internet is covered by {title}.",
+            "llm_total_tokens": 13,
+            "tool_calls": [],
+        }
+
+
+class FakeNoRewriteToolChatLLM(FakeToolChatLLM):
+    def rewrite_retrieval_queries(self, *, question: str) -> dict:
+        del question
+        raise AssertionError("chat search should use local heuristic search without LLM rewrite")
+
+
+class FakeMetadataToolChatLLM(FakeGroundedLLM):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def answer_with_tools(self, *, messages: list[dict], tools: list[dict]) -> dict:
+        del tools
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "role": "assistant",
+                "content": "",
+                "llm_total_tokens": 17,
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "name": "query_document_metadata",
+                        "arguments": '{"document_types":["Invoice"],"limit":10}',
+                    }
+                ],
+            }
+        return {
+            "role": "assistant",
+            "content": "I found the matching invoice metadata.",
+            "llm_total_tokens": 19,
+            "tool_calls": [],
+        }
+
+
+class FakeTaxonomyToolChatLLM(FakeGroundedLLM):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def answer_with_tools(self, *, messages: list[dict], tools: list[dict]) -> dict:
+        del messages
+        del tools
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "role": "assistant",
+                "content": "",
+                "llm_total_tokens": 7,
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "name": "summarize_taxonomy",
+                        "arguments": "{}",
+                    }
+                ],
+            }
+        return {
+            "role": "assistant",
+            "content": "I summarized your document taxonomy.",
+            "llm_total_tokens": 9,
+            "tool_calls": [],
+        }
+
+
+def _save_document(
+    repository: InMemoryDocumentRepository,
+    *,
+    doc_id: str,
+    owner_id: str,
+    filename: str,
+    text_preview: str,
+    title: str,
+    document_type: str = "Memo",
+    tags: list[str] | None = None,
+    document_date: str | None = "2026-03-10",
+) -> None:
+    now = datetime.now(UTC)
+    repository.save(
+        Document(
+            id=doc_id,
+            filename=filename,
+            owner_id=owner_id,
+            blob_uri=f"processed/{doc_id}/{filename}",
+            checksum_sha256=f"sha-{doc_id}",
+            content_type="application/pdf",
+            size_bytes=100,
+            status=DocumentStatus.READY,
+            created_at=now,
+        )
+    )
+    repository.save_parse_result(
+        ParseResult(
+            document_id=doc_id,
+            parser="stub-local",
+            status="parsed",
+            size_bytes=100,
+            page_count=1,
+            text_preview=text_preview,
+            created_at=now,
+        )
+    )
+    parse_result = repository.get_parse_result(doc_id)
+    document = repository.get(doc_id)
+    assert parse_result is not None
+    assert document is not None
+    index_document_chunks(repository=repository, document=document, parse_result=parse_result)
+    repository.save_llm_parse_result(
+        LLMParseResult(
+            document_id=doc_id,
+            suggested_title=title,
+            document_date=document_date,
+            correspondent="Example Corp",
+            document_type=document_type,
+            tags=list(tags or ["Research"]),
+            created_correspondent=False,
+            created_document_type=False,
+            created_tags=[],
+            created_at=now,
+        )
+    )
+
+
+def test_collection_scoped_search_returns_only_collection_docs() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-1",
+        owner_id=TEST_USER.id,
+        filename="doc-1.pdf",
+        text_preview="Neural indexing notes and retrieval quality benchmarks.",
+        title="Neural Indexing Notes",
+    )
+    _save_document(
+        repository,
+        doc_id="doc-2",
+        owner_id=TEST_USER.id,
+        filename="doc-2.pdf",
+        text_preview="Neural search architecture with collection-level ranking.",
+        title="Search Architecture",
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+
+    try:
+        client = TestClient(app)
+
+        create_response = client.post(
+            "/collections",
+            json={"name": "RAG Research", "description": "Scoped docs"},
+        )
+        assert create_response.status_code == 201
+        collection_id = create_response.json()["id"]
+
+        add_response = client.post(
+            f"/collections/{collection_id}/documents",
+            json={"document_ids": ["doc-1"]},
+        )
+        assert add_response.status_code == 200
+        assert add_response.json()["document_ids"] == ["doc-1"]
+
+        scoped_search = client.post(
+            f"/collections/{collection_id}/search",
+            json={"query": "neural", "limit": 10},
+        )
+        assert scoped_search.status_code == 200
+        scoped_payload = scoped_search.json()
+        assert scoped_payload["total_hits"] == 1
+        assert scoped_payload["hits"][0]["document_id"] == "doc-1"
+
+        global_search = client.post(
+            "/collections/search",
+            json={"query": "neural", "limit": 10},
+        )
+        assert global_search.status_code == 200
+        global_ids = {hit["document_id"] for hit in global_search.json()["hits"]}
+        assert global_ids == {"doc-1", "doc-2"}
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_collection_rejects_documents_not_owned_by_user() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-owned",
+        owner_id="another-user",
+        filename="doc-owned.pdf",
+        text_preview="Private content.",
+        title="Private",
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/collections",
+            json={"name": "Private", "description": "Test"},
+        )
+        assert create_response.status_code == 201
+        collection_id = create_response.json()["id"]
+
+        add_response = client.post(
+            f"/collections/{collection_id}/documents",
+            json={"document_ids": ["doc-owned"]},
+        )
+        assert add_response.status_code == 400
+        assert "Invalid document for collection" in add_response.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ask_collection_uses_scoped_chunks_only() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-a",
+        owner_id=TEST_USER.id,
+        filename="doc-a.pdf",
+        text_preview="Alpha topic details around indexing and retrieval.",
+        title="Alpha Doc",
+    )
+    _save_document(
+        repository,
+        doc_id="doc-b",
+        owner_id=TEST_USER.id,
+        filename="doc-b.pdf",
+        text_preview="Beta topic details around security and access controls.",
+        title="Beta Doc",
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeGroundedLLM()
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/collections",
+            json={"name": "Alpha Collection", "description": "Scoped QA"},
+        )
+        assert create_response.status_code == 201
+        collection_id = create_response.json()["id"]
+        add_response = client.post(
+            f"/collections/{collection_id}/documents",
+            json={"document_ids": ["doc-a"]},
+        )
+        assert add_response.status_code == 200
+
+        ask_response = client.post(
+            f"/collections/{collection_id}/ask",
+            json={"question": "What does alpha say about indexing?"},
+        )
+        assert ask_response.status_code == 200
+        payload = ask_response.json()
+        assert payload["insufficient_evidence"] is False
+        assert payload["citations"]
+        assert payload["citations"][0]["document_id"] == "doc-a"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_global_search_supports_tag_and_document_type_filters_without_collection() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-finance",
+        owner_id=TEST_USER.id,
+        filename="finance.pdf",
+        text_preview="Annual statement with account balances and transactions.",
+        title="Finance Statement",
+        document_type="Statement",
+        tags=["Finance"],
+    )
+    _save_document(
+        repository,
+        doc_id="doc-medical",
+        owner_id=TEST_USER.id,
+        filename="medical.pdf",
+        text_preview="Lab report and treatment notes for pediatric visit.",
+        title="Medical Report",
+        document_type="Report",
+        tags=["Medical"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/collections/search",
+            json={
+                "query": "report",
+                "limit": 10,
+                "tag": ["Medical"],
+                "document_type": ["Report"],
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total_hits"] == 1
+        assert payload["hits"][0]["document_id"] == "doc-medical"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_global_ask_supports_tag_and_document_type_filters_without_collection() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-contract",
+        owner_id=TEST_USER.id,
+        filename="contract.pdf",
+        text_preview="Service agreement terms and renewal clauses.",
+        title="Service Contract",
+        document_type="Contract",
+        tags=["Legal"],
+    )
+    _save_document(
+        repository,
+        doc_id="doc-invoice",
+        owner_id=TEST_USER.id,
+        filename="invoice.pdf",
+        text_preview="Invoice items and payable amount details.",
+        title="Invoice Doc",
+        document_type="Invoice",
+        tags=["Finance"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeGroundedLLM()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/collections/ask",
+            json={
+                "question": "What do the terms say?",
+                "top_k_chunks": 10,
+                "tag": ["Legal"],
+                "document_type": ["Contract"],
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["insufficient_evidence"] is False
+        assert payload["citations"]
+        assert payload["citations"][0]["document_id"] == "doc-contract"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_queries_all_documents_with_tool_calls() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-sonic",
+        owner_id=TEST_USER.id,
+        filename="sonic.pdf",
+        text_preview="Sonic Internet monthly bill amount due: $54.99.",
+        title="Sonic Internet Bill",
+        document_type="Invoice",
+        tags=["Utilities"],
+    )
+    _save_document(
+        repository,
+        doc_id="doc-medical",
+        owner_id=TEST_USER.id,
+        filename="medical.pdf",
+        text_preview="Pediatric visit note with height and weight.",
+        title="Visit Note",
+        document_type="Visit Note",
+        tags=["Medical"],
+    )
+
+    llm = FakeToolChatLLM()
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: llm
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/query/chat",
+            json={
+                "messages": [{"role": "user", "content": "How much was Sonic internet?"}],
+                "top_k_chunks": 8,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert "Sonic Internet Bill" in payload["message"]["content"]
+        assert payload["tool_calls"][0]["name"] == "search_document_chunks"
+        assert payload["token_usage"]["total_tokens"] == 24
+        assert payload["token_usage"]["llm_requests"] == 2
+        assert payload["citations"]
+        assert payload["citations"][0]["document_id"] == "doc-sonic"
+        initial_search_messages = [
+            message
+            for message in llm.first_messages or []
+            if "Initial local document search" in str(message.get("content") or "")
+        ]
+        assert initial_search_messages
+        assert '"search_strategy": "local_heuristic"' in initial_search_messages[0]["content"]
+        assert "Sonic Internet Bill" in initial_search_messages[0]["content"]
+        thread_id = payload["thread_id"]
+        assert thread_id
+        saved_preferences = repository.get_user_preference(TEST_USER.id)
+        assert saved_preferences is None or "chat_threads" not in saved_preferences.preferences
+
+        threads_response = client.get("/query/chat/threads")
+        assert threads_response.status_code == 200
+        threads = threads_response.json()
+        assert threads[0]["id"] == thread_id
+        assert threads[0]["message_count"] == 2
+
+        thread_response = client.get(f"/query/chat/threads/{thread_id}")
+        assert thread_response.status_code == 200
+        thread = thread_response.json()
+        assert thread["messages"][0] == {
+            "role": "user",
+            "content": "How much was Sonic internet?",
+        }
+        assert thread["messages"][1]["role"] == "assistant"
+        assert thread["messages"][1]["citations"][0]["document_id"] == "doc-sonic"
+
+        delete_response = client.delete(f"/query/chat/threads/{thread_id}")
+        assert delete_response.status_code == 204
+        assert delete_response.content == b""
+
+        threads_after_delete_response = client.get("/query/chat/threads")
+        assert threads_after_delete_response.status_code == 200
+        assert threads_after_delete_response.json() == []
+
+        missing_thread_response = client.get(f"/query/chat/threads/{thread_id}")
+        assert missing_thread_response.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_search_tool_does_not_run_llm_rewrite() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-sonic",
+        owner_id=TEST_USER.id,
+        filename="sonic.pdf",
+        text_preview="Sonic Internet monthly bill amount due: $54.99.",
+        title="Sonic Internet Bill",
+        document_type="Invoice",
+        tags=["Utilities"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeNoRewriteToolChatLLM()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/query/chat",
+            json={
+                "messages": [{"role": "user", "content": "How much was Sonic internet?"}],
+                "top_k_chunks": 8,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert "Sonic Internet Bill" in payload["message"]["content"]
+        assert payload["token_usage"]["llm_requests"] == 2
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_debug_timing_logs_do_not_include_query_or_result_payload(caplog, monkeypatch) -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-sonic",
+        owner_id=TEST_USER.id,
+        filename="sonic.pdf",
+        text_preview="Sonic Internet monthly bill amount due: $54.99.",
+        title="Sonic Internet Bill",
+        document_type="Invoice",
+        tags=["Utilities"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeToolChatLLM()
+    llm_debug_records = []
+
+    def record_llm_debug_exchange(**kwargs) -> None:
+        llm_debug_records.append(kwargs)
+
+    monkeypatch.setattr(
+        "paperwise.application.services.chat_runtime.log_llm_exchange",
+        record_llm_debug_exchange,
+    )
+
+    try:
+        caplog.set_level(logging.DEBUG, logger="paperwise.application.services.chat_runtime")
+        client = TestClient(app)
+        response = client.post(
+            "/query/chat",
+            json={
+                "messages": [{"role": "user", "content": "How much was Sonic internet?"}],
+                "top_k_chunks": 8,
+            },
+        )
+        assert response.status_code == 200
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert "chat_runtime_timing stage=initial_local_search" in log_text
+        assert "chat_runtime_timing stage=llm_tool_round" in log_text
+        assert "chat_runtime_timing stage=tool_execution" in log_text
+        assert "How much was Sonic internet?" not in log_text
+        assert "Sonic Internet Bill" not in log_text
+        serialized_llm_debug = str(llm_debug_records)
+        assert "'provider': 'chat_runtime'" in serialized_llm_debug
+        assert "'endpoint': 'debug/timing'" in serialized_llm_debug
+        assert "initial_local_search" in serialized_llm_debug
+        assert "How much was Sonic internet?" not in serialized_llm_debug
+        assert "Sonic Internet Bill" not in serialized_llm_debug
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_thread_list_migrates_legacy_preference_threads() -> None:
+    repository = InMemoryDocumentRepository()
+    repository.save_user_preference(
+        UserPreference(
+            user_id=TEST_USER.id,
+            preferences={
+                "ui_theme": "dark",
+                "chat_threads": [
+                    {
+                        "id": "legacy-thread",
+                        "title": "Legacy chat",
+                        "messages": [
+                            {"role": "user", "content": "What did I ask?"},
+                            {"role": "assistant", "content": "A saved answer."},
+                        ],
+                        "token_usage": {"total_tokens": 12, "llm_requests": 1},
+                        "created_at": "2026-05-01T10:00:00+00:00",
+                        "updated_at": "2026-05-01T10:05:00+00:00",
+                    }
+                ],
+            },
+        )
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+
+    try:
+        client = TestClient(app)
+        response = client.get("/query/chat/threads")
+        assert response.status_code == 200
+        assert response.json() == [
+            {
+                "id": "legacy-thread",
+                "title": "Legacy chat",
+                "message_count": 2,
+                "created_at": "2026-05-01T10:00:00+00:00",
+                "updated_at": "2026-05-01T10:05:00+00:00",
+            }
+        ]
+
+        thread_response = client.get("/query/chat/threads/legacy-thread")
+        assert thread_response.status_code == 200
+        assert thread_response.json()["token_usage"]["total_tokens"] == 12
+        assert repository.get_user_preference(TEST_USER.id).preferences == {"ui_theme": "dark"}
+        assert repository.get_chat_thread(TEST_USER.id, "legacy-thread") is not None
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_stream_reports_tool_progress() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-sonic",
+        owner_id=TEST_USER.id,
+        filename="sonic.pdf",
+        text_preview="Sonic Internet monthly bill amount due: $54.99.",
+        title="Sonic Internet Bill",
+        document_type="Invoice",
+        tags=["Utilities"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeToolChatLLM()
+
+    try:
+        client = TestClient(app)
+        with client.stream(
+            "POST",
+            "/query/chat/stream",
+            json={
+                "messages": [{"role": "user", "content": "How much was Sonic internet?"}],
+                "top_k_chunks": 8,
+            },
+        ) as response:
+            assert response.status_code == 200
+            body = "".join(response.iter_text())
+        assert "event: status" in body
+        assert "event: tool_call" in body
+        assert "event: tool_result" in body
+        assert "event: token_usage" in body
+        assert '"total_tokens": 24' in body
+        assert '"thread_id":' in body
+        assert "event: final" in body
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_metadata_tool_scans_all_owned_documents() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-invoice",
+        owner_id=TEST_USER.id,
+        filename="invoice.pdf",
+        text_preview="Invoice amount details.",
+        title="Invoice Doc",
+        document_type="Invoice",
+        tags=["Finance"],
+    )
+    _save_document(
+        repository,
+        doc_id="doc-contract",
+        owner_id=TEST_USER.id,
+        filename="contract.pdf",
+        text_preview="Service agreement details.",
+        title="Contract Doc",
+        document_type="Contract",
+        tags=["Legal"],
+    )
+    _save_document(
+        repository,
+        doc_id="doc-other-owner",
+        owner_id="other-user",
+        filename="other.pdf",
+        text_preview="Invoice amount details.",
+        title="Other Invoice",
+        document_type="Invoice",
+        tags=["Finance"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeMetadataToolChatLLM()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/query/chat",
+            json={
+                "messages": [{"role": "user", "content": "Which invoices do I have?"}],
+                "debug": True,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["tool_calls"][0]["name"] == "query_document_metadata"
+        assert payload["token_usage"]["total_tokens"] == 36
+        documents = payload["debug"]["steps"][0]["result"]["documents"]
+        assert [item["document_id"] for item in documents] == ["doc-invoice"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_taxonomy_tool_uses_owner_aggregates() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-invoice",
+        owner_id=TEST_USER.id,
+        filename="invoice.pdf",
+        text_preview="Invoice amount details.",
+        title="Invoice Doc",
+        document_type="Invoice",
+        tags=["Finance"],
+    )
+    _save_document(
+        repository,
+        doc_id="doc-contract",
+        owner_id=TEST_USER.id,
+        filename="contract.pdf",
+        text_preview="Service agreement details.",
+        title="Contract Doc",
+        document_type="Contract",
+        tags=["Legal"],
+    )
+    _save_document(
+        repository,
+        doc_id="doc-other-owner",
+        owner_id="other-user",
+        filename="other.pdf",
+        text_preview="Other invoice details.",
+        title="Other Invoice",
+        document_type="Invoice",
+        tags=["Finance"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeTaxonomyToolChatLLM()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/query/chat",
+            json={
+                "messages": [{"role": "user", "content": "What taxonomy values do I have?"}],
+                "debug": True,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["tool_calls"][0]["name"] == "summarize_taxonomy"
+        result = payload["debug"]["steps"][0]["result"]
+        assert result["document_count"] == 2
+        assert result["document_types"] == [
+            {"name": "Contract", "document_count": 1},
+            {"name": "Invoice", "document_count": 1},
+        ]
+        assert result["tags"] == [
+            {"name": "Finance", "document_count": 1},
+            {"name": "Legal", "document_count": 1},
+        ]
+        assert result["correspondents"] == [{"name": "Example Corp", "document_count": 2}]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_returns_clean_error_for_provider_without_tool_chat() -> None:
+    repository = InMemoryDocumentRepository()
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeGroundedLLM()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/query/chat",
+            json={"messages": [{"role": "user", "content": "What documents do I have?"}]},
+        )
+        assert response.status_code == 400
+        assert "does not support conversational tool use" in response.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_global_ask_query_expansion_handles_measurement_wording() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-vitals",
+        owner_id=TEST_USER.id,
+        filename="visit-note.pdf",
+        text_preview="Vital signs: Weight 45 lb. Height 120 cm. Follow-up in 6 months.",
+        title="Pediatric Visit Note",
+        document_type="Visit Note",
+        tags=["Medical"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeMassRewriteGroundedLLM()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/collections/ask",
+            json={
+                "question": "List measurement of Quincy mass",
+                "top_k_chunks": 8,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["insufficient_evidence"] is False
+        assert payload["citations"]
+        assert payload["citations"][0]["document_id"] == "doc-vitals"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_global_ask_returns_debug_payload_when_enabled() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-debug",
+        owner_id=TEST_USER.id,
+        filename="debug-note.pdf",
+        text_preview="Weight 32 lb and height 98 cm for Quincy.",
+        title="Debug Visit Note",
+        document_type="Visit Note",
+        tags=["Medical"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeGroundedLLM()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/collections/ask",
+            json={
+                "question": "List measurement of Quincy weight",
+                "top_k_chunks": 8,
+                "debug": True,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert isinstance(payload.get("debug"), dict)
+        debug_payload = payload["debug"]
+        assert "retrieval" in debug_payload
+        assert "sources_sent_to_llm" in debug_payload
+        assert isinstance(debug_payload["sources_sent_to_llm"], list)
+        assert debug_payload["sources_sent_to_llm"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_global_ask_anchor_filter_prefers_chunks_with_must_terms() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-relevant",
+        owner_id=TEST_USER.id,
+        filename="visit-note.pdf",
+        text_preview="Quincy height 110 cm at visit one. Quincy height 115 cm at visit two.",
+        title="Quincy Visit Note",
+        document_type="Visit Note",
+        tags=["Medical"],
+    )
+    _save_document(
+        repository,
+        doc_id="doc-noise",
+        owner_id=TEST_USER.id,
+        filename="credit.pdf",
+        text_preview="Account history and balance records over time with no data and no data.",
+        title="Experian Credit Report",
+        document_type="Credit Report",
+        tags=["Finance"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeAnchoredGroundedLLM()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/collections/ask",
+            json={
+                "question": "History of measurements of Quincy's height",
+                "top_k_chunks": 8,
+                "debug": True,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["citations"]
+        assert payload["citations"][0]["document_id"] == "doc-relevant"
+        debug_payload = payload["debug"]
+        assert debug_payload["retrieval"]["strong_must_terms"] == ["quincy", "height"]
+        assert debug_payload["sources_sent_to_llm"]
+        source_doc_ids = {item["document_id"] for item in debug_payload["sources_sent_to_llm"]}
+        assert source_doc_ids == {"doc-relevant"}
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_build_qa_contexts_limits_unique_documents() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-a",
+        owner_id=TEST_USER.id,
+        filename="doc-a.pdf",
+        text_preview="Doc A text with Quincy weight information.",
+        title="Doc A",
+    )
+    _save_document(
+        repository,
+        doc_id="doc-b",
+        owner_id=TEST_USER.id,
+        filename="doc-b.pdf",
+        text_preview="Doc B text with Quincy weight trend.",
+        title="Doc B",
+    )
+
+    now = datetime.now(UTC)
+    chunk_hits = [
+        DocumentChunkSearchHit(
+            chunk=DocumentChunk(
+                id="doc-a:0",
+                document_id="doc-a",
+                owner_id=TEST_USER.id,
+                chunk_index=0,
+                content="Doc A chunk 0",
+                token_count=4,
+                created_at=now,
+            ),
+            score=0.98,
+            matched_terms=[],
+        ),
+        DocumentChunkSearchHit(
+            chunk=DocumentChunk(
+                id="doc-b:0",
+                document_id="doc-b",
+                owner_id=TEST_USER.id,
+                chunk_index=0,
+                content="Doc B chunk 0",
+                token_count=4,
+                created_at=now,
+            ),
+            score=0.97,
+            matched_terms=[],
+        ),
+        DocumentChunkSearchHit(
+            chunk=DocumentChunk(
+                id="doc-a:1",
+                document_id="doc-a",
+                owner_id=TEST_USER.id,
+                chunk_index=1,
+                content="Doc A chunk 1",
+                token_count=4,
+                created_at=now,
+            ),
+            score=0.96,
+            matched_terms=[],
+        ),
+    ]
+
+    contexts = build_qa_contexts(
+        repository=repository,
+        chunk_hits=chunk_hits,
+        top_k_chunks=10,
+        max_documents=1,
+    )
+
+    selected_doc_ids = {item["document_id"] for item in contexts}
+    assert selected_doc_ids == {"doc-a"}
+    assert len(contexts) == 2
+
+
+def test_global_ask_prefers_anchor_entity_over_generic_monthly_terms() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-sonic",
+        owner_id=TEST_USER.id,
+        filename="sonic.pdf",
+        text_preview=(
+            "Sonic Internet monthly bill amount due: $54.99. "
+            "Monthly service charge and payment confirmation."
+        ),
+        title="Sonic Internet Bill",
+        document_type="Invoice",
+        tags=["Utilities"],
+    )
+    _save_document(
+        repository,
+        doc_id="doc-fed",
+        owner_id=TEST_USER.id,
+        filename="fed.pdf",
+        text_preview=(
+            "Federal Reserve statement with monthly cap per month and payment operations. "
+            "Monthly roll over and payment mechanics."
+        ),
+        title="Federal Reserve Monetary Policy Statement",
+        document_type="Statement",
+        tags=["Finance"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeSonicRewriteGroundedLLM()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/collections/ask",
+            json={
+                "question": "how much paid monthly for Sonic internet",
+                "top_k_chunks": 8,
+                "debug": True,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        debug_payload = payload["debug"]
+        assert debug_payload["retrieval"]["strong_must_terms"] == ["sonic internet", "sonic", "internet"]
+        assert debug_payload["retrieval"]["anchor_filter_applied"] is True
+        source_doc_ids = {item["document_id"] for item in debug_payload["sources_sent_to_llm"]}
+        assert "doc-sonic" in source_doc_ids
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_global_ask_timeout_returns_clean_gateway_timeout_message() -> None:
+    repository = InMemoryDocumentRepository()
+    _save_document(
+        repository,
+        doc_id="doc-timeout",
+        owner_id=TEST_USER.id,
+        filename="timeout.pdf",
+        text_preview="Sonic internet invoice amount due.",
+        title="Timeout Doc",
+        document_type="Invoice",
+        tags=["Utilities"],
+    )
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: FakeTimeoutGroundedLLM()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/collections/ask",
+            json={
+                "question": "How much did I spend on Sonic internet?",
+                "top_k_chunks": 8,
+            },
+        )
+        assert response.status_code == 504
+        detail = str(response.json().get("detail", ""))
+        assert "timed out" in detail.lower()
+        assert "incomplete" in detail.lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_initial_search_citations_and_coverage_survive_followup() -> None:
+    import json
+
+    repository = InMemoryDocumentRepository()
+    _save_document(repository, doc_id="source", owner_id=TEST_USER.id, filename="bill.pdf",
+                   text_preview="Internet bill total $54.99.", title="Internet bill", tags=["Utilities"])
+
+    class DirectAnswer(FakeGroundedLLM):
+        def answer_with_tools(self, *, messages, tools):
+            initial = next(m["content"] for m in messages if "Initial local document search" in m["content"])
+            results = json.loads(initial.split("JSON: ", 1)[1])["result"]["results"]
+            source = results[0]["chunk_id"]
+            return {"content": f"$54.99 [[source:{source}]] [[source:invented]]", "tool_calls": []}
+
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    app.dependency_overrides[llm_provider_dependency] = lambda: DirectAnswer()
+    try:
+        client = TestClient(app)
+        request = {"messages": [{"role": "user", "content": "Internet bill total"}], "scope": {"tag": ["Utilities"]}}
+        answer = client.post("/query/chat", json=request).json()
+        assert "[[citation:1]]" in answer["message"]["content"]
+        assert "[source unavailable]" in answer["message"]["content"]
+        assert answer["citations"][0]["cited"] is True
+        assert answer["coverage"]["retrieved_documents"] == 1
+        assert answer["coverage"]["cited_documents"] == 1
+        assert answer["coverage"]["completeness"] == "not_verified"
+        assert answer["coverage"]["searches"][0]["scope_documents"] == 1
+        request["thread_id"] = answer["thread_id"]
+        request["messages"].extend([answer["message"], {"role": "user", "content": "Internet bill total again"}])
+        response = client.post("/query/chat", json=request)
+        assert response.status_code == 200
+        thread = client.get(f"/query/chat/threads/{answer['thread_id']}").json()
+        assert thread["messages"][1]["citations"] == answer["citations"]
+        assert thread["messages"][1]["coverage"] == answer["coverage"]
+        assert thread["messages"][1]["scope"]["tag"] == ["Utilities"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_tool_filters_cannot_escape_explicit_scope() -> None:
+    from paperwise.application.services.chat_tools import ChatToolScope, execute_chat_tool
+
+    repository = InMemoryDocumentRepository()
+    for doc_id, tag, date in [("selected", "Utilities", "2026-03-10"), ("other-tag", "Medical", "2026-03-10"), ("old", "Utilities", "2025-01-01")]:
+        _save_document(repository, doc_id=doc_id, owner_id=TEST_USER.id, filename=f"{doc_id}.pdf",
+                       text_preview="Internet bill total 54.99", title=doc_id, tags=[tag], document_date=date)
+    scope = ChatToolScope(tag=["Utilities"], date_from="2026-01-01")
+    def run(name, arguments):
+        return execute_chat_tool(repository=repository, llm_provider=FakeGroundedLLM(), current_user=TEST_USER,
+                                 scope=scope, top_k_chunks=18, max_documents=12, name=name, arguments=arguments)
+    assert run("query_document_metadata", {"tags": ["Medical"]})["documents"] == []
+    documents = run("query_document_metadata", {"date_from": "2020-01-01"})["documents"]
+    assert [d["document_id"] for d in documents] == ["selected"]
+    assert "error" in run("get_document_context", {"document_id": "old"})
+    assert "error" in run("get_document_context", {"document_id": "other-tag"})
+
+
+def test_chat_evidence_and_library_are_owner_scoped() -> None:
+    repository = InMemoryDocumentRepository()
+    for doc_id, owner in [("owned", TEST_USER.id), ("private", "someone-else")]:
+        _save_document(repository, doc_id=doc_id, owner_id=owner, filename=f"{doc_id}.pdf",
+                       text_preview="Source passage.", title=doc_id)
+    app.dependency_overrides[document_repository_dependency] = lambda: repository
+    app.dependency_overrides[current_user_dependency] = lambda: TEST_USER
+    try:
+        client = TestClient(app)
+        chunk = repository.list_document_chunks("owned")[0]
+        assert client.get(f"/query/chat/evidence/owned/{chunk.id}").json()["content"] == chunk.content
+        assert client.get("/query/chat/evidence/owned/missing").status_code == 404
+        private = repository.list_document_chunks("private")[0]
+        assert client.get(f"/query/chat/evidence/private/{private.id}").status_code == 404
+        summary = client.get("/query/chat/library").json()
+        assert summary["scope_documents"] == 1
+        assert summary["unready_documents"] == 0
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_scope_rejects_invalid_dates() -> None:
+    import pytest
+    from pydantic import ValidationError
+    from paperwise.server.schemas.chat import ChatScopeRequest
+
+    for values in [{"date_from": "yesterday"}, {"date_from": "2026-04-01", "date_to": "2026-03-01"}]:
+        with pytest.raises(ValidationError):
+            ChatScopeRequest(**values)
+
+
+def test_chat_stream_delivers_answer_deltas_before_final() -> None:
+    from paperwise.application.services.chat_runtime import iter_chat_runtime_events
+    from paperwise.application.services.chat_tools import ChatToolScope
+
+    class StreamingAnswer(FakeGroundedLLM):
+        def answer_with_tools(self, **kwargs):
+            raise AssertionError("Expected streaming path")
+
+        def iter_answer_with_tools(self, **kwargs):
+            yield {"type": "delta", "text": "An "}
+            yield {"type": "delta", "text": "answer"}
+            yield {"type": "final", "response": {"content": "An answer", "tool_calls": [], "llm_total_tokens": 3}}
+
+    events = list(iter_chat_runtime_events(repository=InMemoryDocumentRepository(), llm_provider=StreamingAnswer(),
+                  current_user=TEST_USER, messages=[{"role": "system", "content": "Test"}, {"role": "user", "content": "Question"}],
+                  tools=[], scope=ChatToolScope(), top_k_chunks=18, max_documents=12, max_tool_rounds=3))
+    assert [event.data["text"] for event in events if event.type == "answer_delta"] == ["An ", "answer"]
+    assert events[-1].type == "final"
+    assert events[-1].data.content == "An answer"
+    assert events[-1].data.token_usage["total_tokens"] == 3
+
+
+def test_disconnected_chat_does_not_save_final_answer(monkeypatch) -> None:
+    import asyncio
+    from paperwise.application.services.chat_runtime import ChatRuntimeEvent, ChatRuntimeResult
+    from paperwise.server.routes import query
+    from paperwise.server.schemas.chat import ChatRequest
+
+    repository = InMemoryDocumentRepository()
+    final = ChatRuntimeResult(content="Answer", tool_payloads=[], tool_calls=[], token_usage={}, debug_steps=[])
+    monkeypatch.setattr(query, "iter_chat_runtime_events", lambda **kwargs: iter([
+        ChatRuntimeEvent("status", {"label": "Searching"}), ChatRuntimeEvent("final", final),
+    ]))
+    class DisconnectedRequest:
+        checks = 0
+        async def is_disconnected(self):
+            self.checks += 1
+            return self.checks >= 4
+    async def consume():
+        return [event async for event in query._iter_chat_events(
+            request=DisconnectedRequest(), repository=repository, llm_provider=FakeGroundedLLM(),
+            current_user=TEST_USER, payload=ChatRequest(messages=[{"role":"user", "content":"Question"}]))]
+    events = asyncio.run(consume())
+    assert len(events) == 1
+    assert "status" in events[0]
+    assert repository.list_chat_threads(TEST_USER.id, 20) == []
+
+
+def test_bounded_followup_preserves_earlier_history_and_evidence() -> None:
+    from paperwise.application.services.chat_threads import save_chat_thread_turn
+    from paperwise.domain.models import ChatThread
+
+    repository = InMemoryDocumentRepository()
+    messages = []
+    for index in range(16):
+        messages.extend([{"role":"user", "content":f"Question {index}"},
+                         {"role":"assistant", "content":f"Answer {index}", "citations":[{"document_id":f"doc-{index}"}]}])
+    now = datetime.now(UTC)
+    repository.save_chat_thread(ChatThread(id="long", owner_id=TEST_USER.id, title="Long chat", messages=messages, token_usage={}, created_at=now, updated_at=now))
+    request = [{"role":m["role"], "content":m["content"]} for m in messages[-28:]]
+    request.append({"role":"user", "content":"New question"})
+    save_chat_thread_turn(repository=repository, current_user=TEST_USER, thread_id="long", request_messages=request,
+                          assistant_message={"content":"New answer"}, token_usage={})
+    saved = repository.get_chat_thread(TEST_USER.id, "long")
+    assert len(saved.messages) == 34
+    assert saved.messages[1]["citations"] == messages[1]["citations"]
+    assert saved.messages[31]["citations"] == messages[31]["citations"]

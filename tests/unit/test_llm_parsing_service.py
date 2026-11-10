@@ -1,0 +1,461 @@
+from datetime import UTC, datetime
+
+import httpx
+
+from paperwise.application.services.llm_parsing import parse_with_llm
+from paperwise.application.services.history import build_processing_completed_history_event
+from paperwise.application.services.metadata_updates import validate_document_date
+from paperwise.domain.models import Document, DocumentStatus, HistoryActorType, ParseResult
+from paperwise.infrastructure.llm.json_results import LLMResponseFormatError
+from paperwise.infrastructure.llm.metadata_prompt import extract_metadata_result
+from paperwise.infrastructure.repositories.in_memory_document_repository import (
+    InMemoryDocumentRepository,
+)
+
+
+class FullMetadataLLMProvider:
+    def suggest_metadata(
+        self,
+        *,
+        filename: str,
+        text_preview: str,
+        current_correspondent: str | None,
+        current_document_type: str | None,
+        existing_correspondents: list[str],
+        existing_document_types: list[str],
+        existing_tags: list[str],
+    ) -> dict:
+        del filename
+        del text_preview
+        del current_correspondent
+        del current_document_type
+        del existing_correspondents
+        del existing_document_types
+        del existing_tags
+        return {
+            "suggested_title": "January Statement",
+            "document_date": "2026-01-15",
+            "correspondent": "Experian",
+            "document_type": "Credit Report",
+            "tags": ["Credit", "Identity"],
+        }
+
+
+class PartialMetadataLLMProvider:
+    def suggest_metadata(
+        self,
+        *,
+        filename: str,
+        text_preview: str,
+        current_correspondent: str | None,
+        current_document_type: str | None,
+        existing_correspondents: list[str],
+        existing_document_types: list[str],
+        existing_tags: list[str],
+    ) -> dict:
+        del filename
+        del text_preview
+        del current_correspondent
+        del current_document_type
+        del existing_correspondents
+        del existing_document_types
+        del existing_tags
+        # Intentionally missing most keys to ensure we keep previous values.
+        return {
+            "suggested_title": "January Statement (Reviewed)",
+        }
+
+
+class NullDateLLMProvider:
+    def suggest_metadata(
+        self,
+        *,
+        filename: str,
+        text_preview: str,
+        current_correspondent: str | None,
+        current_document_type: str | None,
+        existing_correspondents: list[str],
+        existing_document_types: list[str],
+        existing_tags: list[str],
+    ) -> dict:
+        del filename
+        del text_preview
+        del current_correspondent
+        del current_document_type
+        del existing_correspondents
+        del existing_document_types
+        del existing_tags
+        # Provider included the key, but did not infer a value.
+        return {
+            "document_date": None,
+        }
+
+
+class InvalidDateLLMProvider:
+    def suggest_metadata(
+        self,
+        *,
+        filename: str,
+        text_preview: str,
+        current_correspondent: str | None,
+        current_document_type: str | None,
+        existing_correspondents: list[str],
+        existing_document_types: list[str],
+        existing_tags: list[str],
+    ) -> dict:
+        del filename
+        del text_preview
+        del current_correspondent
+        del current_document_type
+        del existing_correspondents
+        del existing_document_types
+        del existing_tags
+        return {
+            "document_date": "not-a-date",
+        }
+
+
+class SlashDateLLMProvider:
+    def suggest_metadata(
+        self,
+        *,
+        filename: str,
+        text_preview: str,
+        current_correspondent: str | None,
+        current_document_type: str | None,
+        existing_correspondents: list[str],
+        existing_document_types: list[str],
+        existing_tags: list[str],
+    ) -> dict:
+        del filename
+        del text_preview
+        del current_correspondent
+        del current_document_type
+        del existing_correspondents
+        del existing_document_types
+        del existing_tags
+        return {
+            "document_date": "2/7/2020 05:41:45",
+        }
+
+
+class AcronymCaseLLMProvider:
+    def suggest_metadata(
+        self,
+        *,
+        filename: str,
+        text_preview: str,
+        current_correspondent: str | None,
+        current_document_type: str | None,
+        existing_correspondents: list[str],
+        existing_document_types: list[str],
+        existing_tags: list[str],
+    ) -> dict:
+        del filename
+        del text_preview
+        del current_correspondent
+        del current_document_type
+        del existing_correspondents
+        del existing_document_types
+        del existing_tags
+        return {
+            "suggested_title": "Pediatric Visit",
+            "document_date": "2026-03-10",
+            "correspondent": "Ppmg Pediatrics",
+            "document_type": "Office Visit",
+            "tags": ["Ppmg", "checkup"],
+        }
+
+
+class TokenUsageLLMProvider:
+    def __init__(self, total_tokens: int) -> None:
+        self._total_tokens = total_tokens
+        self._model = "metadata-token-model"
+
+    def suggest_metadata(
+        self,
+        *,
+        filename: str,
+        text_preview: str,
+        current_correspondent: str | None,
+        current_document_type: str | None,
+        existing_correspondents: list[str],
+        existing_document_types: list[str],
+        existing_tags: list[str],
+    ) -> dict:
+        del filename
+        del text_preview
+        del current_correspondent
+        del current_document_type
+        del existing_correspondents
+        del existing_document_types
+        del existing_tags
+        return {
+            "suggested_title": "Tokenized Statement",
+            "document_date": "2026-03-10",
+            "correspondent": "Experian",
+            "document_type": "Credit Report",
+            "tags": ["Credit"],
+            "llm_total_tokens": self._total_tokens,
+        }
+
+
+class TimeoutMetadataLLMProvider:
+    _model = "slow-qwen3"
+
+    def suggest_metadata(
+        self,
+        *,
+        filename: str,
+        text_preview: str,
+        current_correspondent: str | None,
+        current_document_type: str | None,
+        existing_correspondents: list[str],
+        existing_document_types: list[str],
+        existing_tags: list[str],
+    ) -> dict:
+        del filename
+        del text_preview
+        del current_correspondent
+        del current_document_type
+        del existing_correspondents
+        del existing_document_types
+        del existing_tags
+        raise httpx.ReadTimeout("classification timed out")
+
+
+def _build_document() -> Document:
+    return Document(
+        id="doc-llm-merge",
+        filename="statement.pdf",
+        owner_id="user-merge",
+        blob_uri="file:///tmp/statement.pdf",
+        checksum_sha256="abc123",
+        content_type="application/pdf",
+        size_bytes=1234,
+        status=DocumentStatus.PROCESSING,
+        created_at=datetime.now(UTC),
+    )
+
+
+def _build_parse_result(document_id: str) -> ParseResult:
+    return ParseResult(
+        document_id=document_id,
+        parser="mock",
+        status="parsed",
+        size_bytes=1234,
+        page_count=1,
+        text_preview="sample",
+        created_at=datetime.now(UTC),
+    )
+
+
+def test_parse_with_llm_keeps_previous_fields_when_provider_omits_keys() -> None:
+    repository = InMemoryDocumentRepository()
+    document = _build_document()
+    parse_result = _build_parse_result(document.id)
+
+    first = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=FullMetadataLLMProvider(),
+    )
+    second = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=PartialMetadataLLMProvider(),
+    )
+
+    assert first.suggested_title == "January Statement"
+    assert second.suggested_title == "January Statement (Reviewed)"
+    # Omitted fields are preserved from the previous metadata result.
+    assert second.document_date == first.document_date
+    assert second.correspondent == first.correspondent
+    assert second.document_type == first.document_type
+    assert second.tags == first.tags
+
+
+def test_parse_with_llm_keeps_previous_date_when_provider_returns_null() -> None:
+    repository = InMemoryDocumentRepository()
+    document = _build_document()
+    parse_result = _build_parse_result(document.id)
+
+    first = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=FullMetadataLLMProvider(),
+    )
+    second = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=NullDateLLMProvider(),
+    )
+
+    assert first.document_date == "2026-01-15"
+    assert second.document_date == first.document_date
+
+
+def test_parse_with_llm_leaves_date_empty_when_provider_omits_date_and_source_date_is_unavailable() -> None:
+    repository = InMemoryDocumentRepository()
+    document = _build_document()
+    parse_result = _build_parse_result(document.id)
+
+    result = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=PartialMetadataLLMProvider(),
+        source_date_resolver=lambda _document: None,
+    )
+
+    assert result.document_date is None
+
+
+def test_parse_with_llm_uses_source_date_when_provider_returns_null_date() -> None:
+    repository = InMemoryDocumentRepository()
+    document = _build_document()
+    parse_result = _build_parse_result(document.id)
+
+    result = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=NullDateLLMProvider(),
+        source_date_resolver=lambda _document: "2026-04-09",
+    )
+
+    assert result.document_date == "2026-04-09"
+
+
+def test_parse_with_llm_uses_source_date_when_provider_returns_invalid_date() -> None:
+    repository = InMemoryDocumentRepository()
+    document = _build_document()
+    parse_result = _build_parse_result(document.id)
+
+    result = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=InvalidDateLLMProvider(),
+        source_date_resolver=lambda _document: "2026-04-10",
+    )
+
+    assert result.document_date == "2026-04-10"
+
+
+def test_parse_with_llm_accepts_common_slash_date_with_time() -> None:
+    repository = InMemoryDocumentRepository()
+    document = _build_document()
+    parse_result = _build_parse_result(document.id)
+
+    result = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=SlashDateLLMProvider(),
+        source_date_resolver=lambda _document: None,
+    )
+
+    assert result.document_date == "2020-02-07"
+
+
+def test_validate_document_date_normalizes_common_formats() -> None:
+    assert validate_document_date("2026-03-05") == "2026-03-05"
+    assert validate_document_date("2026-03-05T12:13:14Z") == "2026-03-05"
+    assert validate_document_date("2/7/2020 05:41:45") == "2020-02-07"
+    assert validate_document_date("not-a-date") is None
+
+
+def test_parse_with_llm_preserves_acronym_like_casing() -> None:
+    repository = InMemoryDocumentRepository()
+    document = _build_document()
+    parse_result = _build_parse_result(document.id)
+
+    result = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=AcronymCaseLLMProvider(),
+    )
+
+    assert result.correspondent == "PPMG Pediatrics"
+    assert "PPMG" in result.tags
+
+
+def test_parse_with_llm_tracks_total_tokens_in_user_preferences() -> None:
+    repository = InMemoryDocumentRepository()
+    document = _build_document()
+    parse_result = _build_parse_result(document.id)
+
+    first = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=TokenUsageLLMProvider(120),
+    )
+    second = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=TokenUsageLLMProvider(80),
+    )
+
+    assert first.llm_total_tokens == 120
+    assert second.llm_total_tokens == 80
+    assert first.llm_details is not None
+    assert first.llm_details["provider"] == "tokenusage"
+    assert first.llm_details["model"] == "metadata-token-model"
+    assert first.llm_details["total_tokens"] == 120
+    preference = repository.get_user_preference(document.owner_id)
+    assert preference is not None
+    assert preference.preferences["llm_total_tokens_processed"] == 200
+
+
+def test_parse_with_llm_uses_fallback_metadata_when_classification_times_out() -> None:
+    repository = InMemoryDocumentRepository()
+    document = _build_document()
+    parse_result = _build_parse_result(document.id)
+
+    result = parse_with_llm(
+        document=document,
+        parse_result=parse_result,
+        repository=repository,
+        llm_provider=TimeoutMetadataLLMProvider(),
+        source_date_resolver=lambda _document: "2026-05-01",
+    )
+
+    assert result.suggested_title == document.filename
+    assert result.document_date == "2026-05-01"
+    assert result.correspondent == "Unknown Sender"
+    assert result.document_type == "General Document"
+    assert result.tags == []
+    assert result.llm_details is not None
+    assert result.llm_details["status"] == "fallback"
+    assert result.llm_details["error_type"] == "ReadTimeout"
+    assert "classification timed out" in result.llm_details["error_message"]
+    assert repository.get_llm_parse_result(document.id) == result
+
+
+def test_invalid_metadata_shape_is_recorded_in_processing_history() -> None:
+    class InvalidShapeProvider:
+        def suggest_metadata(self, **kwargs):
+            return extract_metadata_result([{}, {}])
+
+    repository = InMemoryDocumentRepository()
+    document = _build_document()
+    result = parse_with_llm(
+        document=document, parse_result=_build_parse_result(document.id), repository=repository,
+        llm_provider=InvalidShapeProvider(), source_date_resolver=lambda _document: None,
+    )
+    event = build_processing_completed_history_event(
+        document_id=document.id, actor_type=HistoryActorType.SYSTEM, actor_id=None, source="test",
+        previous_status="processing", current_status="ready", llm_result=result,
+    )
+    details = event.changes["metadata_parse"]
+    assert details["status"] == "fallback"
+    assert details["error_type"] == LLMResponseFormatError.__name__
+    assert "received list" in details["error_message"]

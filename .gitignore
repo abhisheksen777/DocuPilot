@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment and local config
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+# Tooling
+dist/
+build/
+node_modules/
+.astro/
+coverage.xml
+.coverage
+.run/
+.logs/
+.claude/
+.playwright-cli/
+.playwright-mcp/
+*.log
+
+# Editor temp files
+*.swp
+
+# macOS metadata
+.DS_Store
+
+# Local test documents
+local/
