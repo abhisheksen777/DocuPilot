@@ -1,12 +1,12 @@
 from datetime import UTC, datetime
 
-from paperwise.application.services.chat_tool_payloads import (
+from docupilot.application.services.chat_tool_payloads import (
     taxonomy_counts_payload,
     taxonomy_stats_payload,
     tool_document_item,
 )
-from paperwise.domain.models import Document, DocumentStatus, LLMParseResult
-from paperwise.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
+from docupilot.domain.models import Document, DocumentStatus, LLMParseResult
+from docupilot.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
 
 
 def test_tool_document_item_includes_llm_metadata_when_available() -> None:

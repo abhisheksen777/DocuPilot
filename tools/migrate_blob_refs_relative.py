@@ -6,10 +6,10 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from paperwise.application.services.storage_paths import blob_ref_to_path, path_to_blob_ref
-from paperwise.infrastructure.config import get_settings
-from paperwise.infrastructure.db import build_engine, build_session_factory
-from paperwise.infrastructure.repositories.postgres_models import DocumentRow
+from docupilot.application.services.storage_paths import blob_ref_to_path, path_to_blob_ref
+from docupilot.infrastructure.config import get_settings
+from docupilot.infrastructure.db import build_engine, build_session_factory
+from docupilot.infrastructure.repositories.postgres_models import DocumentRow
 
 
 def main() -> None:
@@ -26,7 +26,7 @@ def main() -> None:
     settings = get_settings()
     if settings.repository_backend.lower() != "postgres":
         raise SystemExit(
-            f"Repository backend is {settings.repository_backend!r}; set PAPERWISE_REPOSITORY_BACKEND=postgres.",
+            f"Repository backend is {settings.repository_backend!r}; set DOCUPILOT_REPOSITORY_BACKEND=postgres.",
         )
 
     root_dir = Path(settings.object_store_root).expanduser().resolve()

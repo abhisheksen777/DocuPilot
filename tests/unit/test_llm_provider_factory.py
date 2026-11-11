@@ -1,10 +1,10 @@
 import pytest
 
-from paperwise.application.services.llm_preferences import (
+from docupilot.application.services.llm_preferences import (
     resolve_ocr_auto_switch,
     resolve_ocr_provider,
 )
-from paperwise.application.services.llm_provider_factory import resolve_llm_provider_from_preferences
+from docupilot.application.services.llm_provider_factory import resolve_llm_provider_from_preferences
 
 
 class FakeLLMProvider:

@@ -1,4 +1,4 @@
-from paperwise.application.services.taxonomy_stats import sort_stat_rows
+from docupilot.application.services.taxonomy_stats import sort_stat_rows
 
 
 def test_sort_stat_rows_sorts_text_fields_case_insensitively() -> None:

@@ -1,24 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://paperwise.dev/</loc>
+    <loc>https://docupilot.example.com/</loc>
   </url>
   <url>
-    <loc>https://paperwise.dev/docs/</loc>
+    <loc>https://docupilot.example.com/docs/</loc>
   </url>
   <url>
-    <loc>https://paperwise.dev/docs/getting-started/</loc>
+    <loc>https://docupilot.example.com/docs/getting-started/</loc>
   </url>
   <url>
-    <loc>https://paperwise.dev/docs/model-config/</loc>
+    <loc>https://docupilot.example.com/docs/model-config/</loc>
   </url>
   <url>
-    <loc>https://paperwise.dev/docs/reference/local-development/</loc>
+    <loc>https://docupilot.example.com/docs/reference/local-development/</loc>
   </url>
   <url>
-    <loc>https://paperwise.dev/docs/reference/repository-layout/</loc>
+    <loc>https://docupilot.example.com/docs/reference/repository-layout/</loc>
   </url>
   <url>
-    <loc>https://paperwise.dev/docs/support/</loc>
+    <loc>https://docupilot.example.com/docs/support/</loc>
   </url>
 </urlset>

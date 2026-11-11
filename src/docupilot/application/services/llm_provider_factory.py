@@ -1,0 +1,176 @@
+from collections.abc import Callable
+from typing import Any
+
+from docupilot.application.interfaces import LLMProvider, PreferenceRepository
+from docupilot.application.services.llm_preferences import (
+    LLM_TASK_METADATA,
+    LLM_TASK_OCR,
+    ResolvedLLMTaskConfig,
+    default_base_url_for_provider,
+    default_model_for_task,
+    resolve_task_config,
+    validate_api_key_for_provider,
+)
+from docupilot.application.services.user_preferences import load_user_preferences
+from docupilot.infrastructure.config import get_settings
+from docupilot.infrastructure.llm.gemini_llm_provider import GeminiLLMProvider
+from docupilot.infrastructure.llm.openai_llm_provider import OpenAILLMProvider
+
+ProviderErrorFactory = Callable[[str], Exception]
+
+
+def resolve_llm_provider_from_preferences(
+    *,
+    preferences: dict[str, Any],
+    provider_override: LLMProvider | None = None,
+    task: str = LLM_TASK_METADATA,
+    missing_provider_detail: str = "Configure an LLM provider in Settings before running LLM parse.",
+    missing_api_key_detail: str = "Selected LLM provider requires your API key in Settings.",
+    missing_base_url_detail: str = "Custom LLM provider requires a base URL in Settings.",
+    custom_response_format_type: str | None = None,
+    error_factory: ProviderErrorFactory = RuntimeError,
+) -> LLMProvider:
+    config = resolve_task_config(preferences, task)
+    ocr_image_detail = str(preferences.get("ocr_image_detail", "auto")).strip().lower()
+    if ocr_image_detail not in {"auto", "low", "high"}:
+        ocr_image_detail = "auto"
+    return build_provider_from_task_config(
+        config=config,
+        provider_override=provider_override,
+        task=task,
+        ocr_image_detail=ocr_image_detail,
+        missing_provider_detail=missing_provider_detail,
+        missing_api_key_detail=missing_api_key_detail,
+        missing_base_url_detail=missing_base_url_detail,
+        custom_response_format_type=custom_response_format_type,
+        error_factory=error_factory,
+    )
+
+
+def resolve_llm_provider_for_user(
+    *,
+    repository: PreferenceRepository,
+    user_id: str,
+    provider_override: LLMProvider | None = None,
+    task: str = LLM_TASK_METADATA,
+    missing_provider_detail: str = "Configure an LLM provider in Settings before running LLM parse.",
+    missing_api_key_detail: str = "Selected LLM provider requires your API key in Settings.",
+    missing_base_url_detail: str = "Custom LLM provider requires a base URL in Settings.",
+    custom_response_format_type: str | None = None,
+    error_factory: ProviderErrorFactory = RuntimeError,
+) -> LLMProvider:
+    return resolve_llm_provider_from_preferences(
+        preferences=load_user_preferences(repository=repository, user_id=user_id),
+        provider_override=provider_override,
+        task=task,
+        missing_provider_detail=missing_provider_detail,
+        missing_api_key_detail=missing_api_key_detail,
+        missing_base_url_detail=missing_base_url_detail,
+        custom_response_format_type=custom_response_format_type,
+        error_factory=error_factory,
+    )
+
+
+def resolve_metadata_llm_provider_for_user(
+    *,
+    repository: PreferenceRepository,
+    user_id: str,
+    provider_override: LLMProvider | None = None,
+    missing_provider_detail: str = "Configure an LLM provider in Settings before running LLM parse.",
+    missing_api_key_detail: str = "Selected LLM provider requires your API key in Settings.",
+    missing_base_url_detail: str = "Custom LLM provider requires a base URL in Settings.",
+    custom_response_format_type: str | None = None,
+    error_factory: ProviderErrorFactory = RuntimeError,
+) -> LLMProvider:
+    return resolve_llm_provider_for_user(
+        repository=repository,
+        user_id=user_id,
+        provider_override=provider_override,
+        task=LLM_TASK_METADATA,
+        missing_provider_detail=missing_provider_detail,
+        missing_api_key_detail=missing_api_key_detail,
+        missing_base_url_detail=missing_base_url_detail,
+        custom_response_format_type=custom_response_format_type,
+        error_factory=error_factory,
+    )
+
+
+def resolve_ocr_llm_provider_for_user(
+    *,
+    repository: PreferenceRepository,
+    user_id: str,
+    provider_override: LLMProvider | None = None,
+    ocr_provider: str,
+    missing_provider_detail: str = "Configure an OCR LLM connection in Settings before OCR parsing.",
+    missing_api_key_detail: str = "Selected OCR LLM connection requires an API key in Settings.",
+    missing_base_url_detail: str = "Custom OCR LLM connection requires a base URL in Settings.",
+    custom_response_format_type: str | None = None,
+    error_factory: ProviderErrorFactory = RuntimeError,
+) -> LLMProvider | None:
+    if ocr_provider == "tesseract":
+        return None
+    return resolve_llm_provider_for_user(
+        repository=repository,
+        user_id=user_id,
+        provider_override=provider_override,
+        task=LLM_TASK_OCR,
+        missing_provider_detail=missing_provider_detail,
+        missing_api_key_detail=missing_api_key_detail,
+        missing_base_url_detail=missing_base_url_detail,
+        custom_response_format_type=custom_response_format_type,
+        error_factory=error_factory,
+    )
+
+
+def build_provider_from_task_config(
+    *,
+    config: ResolvedLLMTaskConfig | None,
+    provider_override: LLMProvider | None = None,
+    task: str,
+    ocr_image_detail: str = "auto",
+    missing_provider_detail: str,
+    missing_api_key_detail: str,
+    missing_base_url_detail: str,
+    custom_response_format_type: str | None = None,
+    error_factory: ProviderErrorFactory = RuntimeError,
+) -> LLMProvider:
+    if provider_override is not None:
+        return provider_override
+
+    if config is None or not config.provider:
+        raise error_factory(missing_provider_detail)
+    if not config.api_key:
+        raise error_factory(missing_api_key_detail)
+    api_key_error = validate_api_key_for_provider(config.provider, config.api_key)
+    if api_key_error:
+        raise error_factory(api_key_error)
+
+    timeout_seconds = get_settings().llm_request_timeout_seconds
+
+    if config.provider == "openai":
+        return OpenAILLMProvider(
+            api_key=config.api_key,
+            model=config.model or default_model_for_task("openai", task),
+            base_url=config.base_url or default_base_url_for_provider("openai"),
+            vision_image_detail=ocr_image_detail,
+            timeout_seconds=timeout_seconds,
+        )
+    if config.provider == "gemini":
+        return GeminiLLMProvider(
+            api_key=config.api_key,
+            model=config.model or default_model_for_task("gemini", task),
+            base_url=config.base_url or default_base_url_for_provider("gemini"),
+            timeout_seconds=timeout_seconds,
+        )
+    if config.provider == "custom":
+        if not config.base_url:
+            raise error_factory(missing_base_url_detail)
+        return OpenAILLMProvider(
+            api_key=config.api_key,
+            model=config.model or default_model_for_task("custom", task),
+            base_url=config.base_url,
+            vision_image_detail=ocr_image_detail,
+            response_format_type=custom_response_format_type,
+            timeout_seconds=timeout_seconds,
+        )
+    raise error_factory(f"Unsupported LLM provider: {config.provider}")

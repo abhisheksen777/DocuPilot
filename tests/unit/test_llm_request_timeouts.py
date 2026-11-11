@@ -3,15 +3,15 @@ import json
 import httpx
 import pytest
 
-from paperwise.application.services import llm_provider_factory
-from paperwise.application.services.llm_provider_factory import resolve_llm_provider_from_preferences
-from paperwise.domain.models import UserPreference
-from paperwise.infrastructure.config import Settings
-from paperwise.infrastructure.llm.gemini_llm_provider import GeminiLLMProvider
-from paperwise.infrastructure.llm.openai_llm_provider import OpenAILLMProvider
-from paperwise.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
-from paperwise.server.http_llm_provider import resolve_http_llm_provider_for_user
-from paperwise.workers.tasks import _resolve_metadata_llm_provider_for_owner, _resolve_ocr_llm_provider_for_owner
+from docupilot.application.services import llm_provider_factory
+from docupilot.application.services.llm_provider_factory import resolve_llm_provider_from_preferences
+from docupilot.domain.models import UserPreference
+from docupilot.infrastructure.config import Settings
+from docupilot.infrastructure.llm.gemini_llm_provider import GeminiLLMProvider
+from docupilot.infrastructure.llm.openai_llm_provider import OpenAILLMProvider
+from docupilot.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
+from docupilot.server.http_llm_provider import resolve_http_llm_provider_for_user
+from docupilot.workers.tasks import _resolve_metadata_llm_provider_for_owner, _resolve_ocr_llm_provider_for_owner
 
 
 @pytest.mark.parametrize("timeout", [None, 7.5, 300.0])

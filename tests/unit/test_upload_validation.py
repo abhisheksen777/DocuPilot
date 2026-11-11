@@ -1,4 +1,4 @@
-from paperwise.application.services.upload_validation import is_supported_upload
+from docupilot.application.services.upload_validation import is_supported_upload
 
 
 def test_requested_lightweight_document_formats_are_supported_uploads() -> None:

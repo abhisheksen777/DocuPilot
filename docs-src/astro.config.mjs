@@ -3,13 +3,13 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-	site: 'https://paperwise.dev',
+	site: 'https://docupilot.example.com',
 	base: '/docs',
 	outDir: '../website/docs',
 	integrations: [
 		starlight({
-			title: 'Paperwise Docs',
-			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/zellux/paperwise' }],
+			title: 'DocuPilot Docs',
+			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/abhisheksen777/DocuPilot' }],
 			head: [
 				{
 					tag: 'script',

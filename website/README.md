@@ -1,6 +1,6 @@
 # Static Website
 
-This directory contains a standalone static website for Paperwise marketing content.
+This directory contains a standalone static website for DocuPilot marketing content.
 
 Generated product docs are published to `./docs`, with the Starlight source living in
 the top-level `docs-src/` directory. Prefer updating setup, support, and operational

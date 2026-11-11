@@ -28,7 +28,7 @@ def main() -> int:
 
     checks = [
         (
-            "src/paperwise/server/main.py",
+            "src/docupilot/server/main.py",
             r"version=__version__",
             "FastAPI app version source",
         ),

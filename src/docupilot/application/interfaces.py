@@ -1,0 +1,355 @@
+from datetime import datetime
+from typing import Any, Protocol
+
+from docupilot.domain.models import (
+    ChatThread,
+    ChatThreadDocumentReference,
+    Collection,
+    Document,
+    DocumentChunk,
+    DocumentChunkSearchHit,
+    DocumentHistoryEvent,
+    DocumentIndexState,
+    DocumentSearchHit,
+    DocumentStatus,
+    LLMParseResult,
+    ParseResult,
+    User,
+    UserPreference,
+)
+
+
+class OCRProvider(Protocol):
+    def extract_text(self, uri: str) -> str:
+        """Extract text from a document object URI."""
+
+
+class EmbeddingProvider(Protocol):
+    def embed(self, text: str) -> list[float]:
+        """Create an embedding for an input text."""
+
+
+class LLMProvider(Protocol):
+    def extract_ocr_text(
+        self,
+        *,
+        filename: str,
+        content_type: str,
+        text_preview: str,
+    ) -> str:
+        """Extract OCR text from a document preview using OCR-specific prompting."""
+
+    def suggest_metadata(
+        self,
+        *,
+        filename: str,
+        text_preview: str,
+        current_correspondent: str | None,
+        current_document_type: str | None,
+        existing_correspondents: list[str],
+        existing_document_types: list[str],
+        existing_tags: list[str],
+    ) -> dict[str, Any]:
+        """Suggest document metadata fields from parsed text and taxonomy context."""
+
+    def answer_grounded(
+        self,
+        *,
+        question: str,
+        contexts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Answer a question strictly from provided contexts with citations."""
+
+    def rewrite_retrieval_queries(
+        self,
+        *,
+        question: str,
+    ) -> dict[str, Any]:
+        """Generate retrieval query variants and anchors for grounded retrieval."""
+
+    def answer_with_tools(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Run a chat turn that may request one or more application-owned tool calls."""
+
+
+class SearchProvider(Protocol):
+    def search(self, query: str, limit: int = 10) -> list[dict]:
+        """Run a retrieval query and return result documents/chunks."""
+
+
+class StorageProvider(Protocol):
+    def put(self, key: str, data: bytes, content_type: str) -> str:
+        """Store a binary artifact and return its canonical URI."""
+
+    def delete(self, uri: str) -> None:
+        """Delete a previously stored artifact if it exists."""
+
+
+class DocumentStore(Protocol):
+    def save(self, document: Document) -> None:
+        """Persist a document aggregate."""
+
+    def get(self, document_id: str) -> Document | None:
+        """Load a document by ID."""
+
+    def get_by_owner_checksum(self, owner_id: str, checksum_sha256: str) -> Document | None:
+        """Find an existing document by owner + SHA256 checksum."""
+
+    def list_documents(self, limit: int = 100, *, offset: int = 0) -> list[Document]:
+        """List recent documents."""
+
+    def list_owner_documents_with_llm_results(
+        self,
+        *,
+        owner_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        statuses: set[DocumentStatus] | None = None,
+    ) -> list[tuple[Document, LLMParseResult | None]]:
+        """List owner documents with optional LLM metadata in one repository call."""
+
+    def list_owner_documents_with_search_results(
+        self,
+        *,
+        owner_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        statuses: set[DocumentStatus] | None = None,
+    ) -> list[tuple[Document, LLMParseResult | None, ParseResult | None]]:
+        """List owner documents with metadata and parsed text for search scans."""
+
+    def count_owner_documents_by_statuses(
+        self,
+        *,
+        owner_id: str,
+        statuses: set[DocumentStatus],
+    ) -> int:
+        """Count owner documents whose status is in the provided set."""
+
+    def delete_document(self, document_id: str) -> None:
+        """Delete a document and all related records."""
+
+
+class ParseResultRepository(Protocol):
+    def save_parse_result(self, result: ParseResult) -> None:
+        """Persist parse output for a document."""
+
+    def get_parse_result(self, document_id: str) -> ParseResult | None:
+        """Load parse output by document ID."""
+
+    def delete_document_analysis_artifacts(self, document_id: str) -> None:
+        """Delete parse output, LLM metadata, and derived chunks for one document."""
+
+    def save_llm_parse_result(self, result: LLMParseResult) -> None:
+        """Persist LLM metadata parse output for a document."""
+
+    def get_llm_parse_result(self, document_id: str) -> LLMParseResult | None:
+        """Load LLM metadata parse output for a document."""
+
+
+class TaxonomyRepository(Protocol):
+    def list_correspondents(self) -> list[str]:
+        """Return known correspondent names."""
+
+    def list_document_types(self) -> list[str]:
+        """Return known document type names."""
+
+    def list_tags(self) -> list[str]:
+        """Return known tag names."""
+
+    def list_tag_stats(self) -> list[tuple[str, int]]:
+        """Return tag usage counts as (tag_name, document_count)."""
+
+    def list_owner_tag_stats(self, owner_id: str) -> list[tuple[str, int]]:
+        """Return owner-scoped tag usage counts as (tag_name, document_count)."""
+
+    def list_owner_document_type_stats(self, owner_id: str) -> list[tuple[str, int]]:
+        """Return owner-scoped document type counts as (document_type, document_count)."""
+
+    def list_owner_correspondent_stats(self, owner_id: str) -> list[tuple[str, int]]:
+        """Return owner-scoped correspondent counts as (correspondent, document_count)."""
+
+    def add_correspondent(self, name: str) -> None:
+        """Add a correspondent if missing."""
+
+    def add_document_type(self, name: str) -> None:
+        """Add a document type if missing."""
+
+    def add_tags(self, names: list[str]) -> None:
+        """Add tag names if missing."""
+
+
+class HistoryRepository(Protocol):
+    def append_history_events(self, events: list[DocumentHistoryEvent]) -> None:
+        """Append one or more immutable document history events."""
+
+    def list_history(
+        self,
+        document_id: str,
+        *,
+        limit: int = 100,
+    ) -> list[DocumentHistoryEvent]:
+        """Return document history entries ordered newest-first."""
+
+
+class UserRepository(Protocol):
+    def save_user(self, user: User) -> None:
+        """Persist a user."""
+
+    def get_user(self, user_id: str) -> User | None:
+        """Load a user by ID."""
+
+    def get_user_by_email(self, email: str) -> User | None:
+        """Load a user by email."""
+
+    def list_users(self, limit: int = 100) -> list[User]:
+        """List users ordered newest-first."""
+
+
+class PreferenceRepository(Protocol):
+    def save_user_preference(self, preference: UserPreference) -> None:
+        """Persist user preferences payload."""
+
+    def get_user_preference(self, user_id: str) -> UserPreference | None:
+        """Load user preferences by user ID."""
+
+
+class ChatThreadRepository(Protocol):
+    def save_chat_thread(self, thread: ChatThread) -> None:
+        """Persist one user-owned chat thread."""
+
+    def get_chat_thread(self, owner_id: str, thread_id: str) -> ChatThread | None:
+        """Load one user-owned chat thread."""
+
+    def list_chat_threads(self, owner_id: str, limit: int = 20) -> list[ChatThread]:
+        """List chat threads for a user ordered newest-first."""
+
+    def list_document_chat_thread_references(
+        self,
+        owner_id: str,
+        document_id: str,
+        limit: int = 50,
+    ) -> list[ChatThreadDocumentReference]:
+        """List chat threads that reference one user-owned document."""
+
+    def delete_chat_thread(self, owner_id: str, thread_id: str) -> bool:
+        """Delete one user-owned chat thread if present."""
+
+
+class CollectionRepository(Protocol):
+    def create_collection(self, collection: Collection) -> None:
+        """Persist a user-owned collection."""
+
+    def get_collection(self, collection_id: str) -> Collection | None:
+        """Load a collection by ID."""
+
+    def list_collections(self, owner_id: str) -> list[Collection]:
+        """List collections for a user."""
+
+    def delete_collection(self, collection_id: str) -> None:
+        """Delete a collection and its document memberships."""
+
+    def add_collection_documents(
+        self,
+        collection_id: str,
+        document_ids: list[str],
+        *,
+        added_at: datetime,
+    ) -> None:
+        """Add one or more documents to a collection."""
+
+    def remove_collection_document(self, collection_id: str, document_id: str) -> None:
+        """Remove one document from a collection."""
+
+    def list_collection_document_ids(self, collection_id: str) -> list[str]:
+        """Return document IDs contained in a collection."""
+
+
+class SearchRepository(Protocol):
+    def search_documents(
+        self,
+        *,
+        owner_id: str,
+        query: str,
+        limit: int = 20,
+        document_ids: list[str] | None = None,
+    ) -> list[DocumentSearchHit]:
+        """Run keyword search over owner-visible documents (optionally scoped to IDs)."""
+
+
+class DocumentChunkRepository(Protocol):
+    def replace_document_chunks(
+        self,
+        *,
+        document_id: str,
+        owner_id: str,
+        chunks: list[DocumentChunk],
+    ) -> None:
+        """Replace indexed chunks for one document."""
+
+    def list_document_chunks(self, document_id: str) -> list[DocumentChunk]:
+        """List indexed chunks for one document."""
+
+    def search_document_chunks(
+        self,
+        *,
+        owner_id: str,
+        query: str,
+        limit: int = 40,
+        document_ids: list[str] | None = None,
+    ) -> list[DocumentChunkSearchHit]:
+        """Run keyword chunk search over owner-visible chunks (optionally scoped)."""
+
+
+class DocumentIndexStateRepository(Protocol):
+    def save_document_index_state(self, state: DocumentIndexState) -> None:
+        """Persist the current retrieval-index state for one document."""
+
+    def get_document_index_state(self, document_id: str) -> DocumentIndexState | None:
+        """Load one document's retrieval-index state."""
+
+    def list_document_index_states(
+        self,
+        *,
+        owner_id: str,
+        document_ids: list[str] | None = None,
+    ) -> list[DocumentIndexState]:
+        """List retrieval-index states for an owner, optionally scoped to documents."""
+
+    def delete_document_index_state(self, document_id: str) -> None:
+        """Delete the retrieval-index state for one document."""
+
+
+class DocumentRepository(
+    DocumentStore,
+    ParseResultRepository,
+    TaxonomyRepository,
+    HistoryRepository,
+    UserRepository,
+    PreferenceRepository,
+    ChatThreadRepository,
+    CollectionRepository,
+    SearchRepository,
+    DocumentChunkRepository,
+    DocumentIndexStateRepository,
+    Protocol,
+):
+    """Compatibility aggregate for call sites that still need the full repository surface."""
+
+
+class IngestionDispatcher(Protocol):
+    def enqueue(
+        self,
+        document_id: str,
+        blob_uri: str,
+        filename: str,
+        content_type: str,
+    ) -> str:
+        """Dispatch ingestion work and return a job identifier."""
+
+    def enqueue_reindex(self, document_id: str) -> str:
+        """Dispatch retrieval-index rebuilding and return a job identifier."""

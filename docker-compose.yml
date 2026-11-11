@@ -4,19 +4,19 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      PAPERWISE_ENV: docker
-      PAPERWISE_LOG_LEVEL: INFO
-      PAPERWISE_API_HOST: 0.0.0.0
-      PAPERWISE_API_PORT: 8000
-      PAPERWISE_REDIS_URL: redis://redis:6379/0
-      PAPERWISE_REPOSITORY_BACKEND: postgres
-      PAPERWISE_POSTGRES_URL: postgresql+psycopg://paperwise:paperwise@postgres:5432/paperwise
-      PAPERWISE_OBJECT_STORE_ROOT: /data/object-store
-      PAPERWISE_AUTH_SECRET: ${PAPERWISE_AUTH_SECRET:-paperwise-change-me}
-      PAPERWISE_SESSION_TTL_SECONDS: ${PAPERWISE_SESSION_TTL_SECONDS:-43200}
-      PAPERWISE_SESSION_COOKIE_SECURE: ${PAPERWISE_SESSION_COOKIE_SECURE:-false}
-      PAPERWISE_DISABLE_SIGNUP: ${PAPERWISE_DISABLE_SIGNUP:-false}
-      PAPERWISE_LLM_REQUEST_TIMEOUT_SECONDS: ${PAPERWISE_LLM_REQUEST_TIMEOUT_SECONDS:-}
+      DOCUPILOT_ENV: docker
+      DOCUPILOT_LOG_LEVEL: INFO
+      DOCUPILOT_API_HOST: 0.0.0.0
+      DOCUPILOT_API_PORT: 8000
+      DOCUPILOT_REDIS_URL: redis://redis:6379/0
+      DOCUPILOT_REPOSITORY_BACKEND: postgres
+      DOCUPILOT_POSTGRES_URL: postgresql+psycopg://docupilot:docupilot@postgres:5432/docupilot
+      DOCUPILOT_OBJECT_STORE_ROOT: /data/object-store
+      DOCUPILOT_AUTH_SECRET: ${DOCUPILOT_AUTH_SECRET:-docupilot-change-me}
+      DOCUPILOT_SESSION_TTL_SECONDS: ${DOCUPILOT_SESSION_TTL_SECONDS:-43200}
+      DOCUPILOT_SESSION_COOKIE_SECURE: ${DOCUPILOT_SESSION_COOKIE_SECURE:-false}
+      DOCUPILOT_DISABLE_SIGNUP: ${DOCUPILOT_DISABLE_SIGNUP:-false}
+      DOCUPILOT_LLM_REQUEST_TIMEOUT_SECONDS: ${DOCUPILOT_LLM_REQUEST_TIMEOUT_SECONDS:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -25,7 +25,7 @@ services:
     ports:
       - "8080:8000"
     volumes:
-      - paperwise_data:/data
+      - docupilot_data:/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
       interval: 15s
@@ -38,26 +38,26 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["sh", "-c", "exec celery -A paperwise.workers.celery_app.celery_app worker --loglevel=INFO ${PAPERWISE_WORKER_CONCURRENCY:+--concurrency=${PAPERWISE_WORKER_CONCURRENCY}}"]
+    command: ["sh", "-c", "exec celery -A docupilot.workers.celery_app.celery_app worker --loglevel=INFO ${DOCUPILOT_WORKER_CONCURRENCY:+--concurrency=${DOCUPILOT_WORKER_CONCURRENCY}}"]
     environment:
-      PAPERWISE_ENV: docker
-      PAPERWISE_LOG_LEVEL: INFO
-      PAPERWISE_REDIS_URL: redis://redis:6379/0
-      PAPERWISE_REPOSITORY_BACKEND: postgres
-      PAPERWISE_POSTGRES_URL: postgresql+psycopg://paperwise:paperwise@postgres:5432/paperwise
-      PAPERWISE_OBJECT_STORE_ROOT: /data/object-store
-      PAPERWISE_AUTH_SECRET: ${PAPERWISE_AUTH_SECRET:-paperwise-change-me}
-      PAPERWISE_SESSION_TTL_SECONDS: ${PAPERWISE_SESSION_TTL_SECONDS:-43200}
-      PAPERWISE_SESSION_COOKIE_SECURE: ${PAPERWISE_SESSION_COOKIE_SECURE:-false}
-      PAPERWISE_DISABLE_SIGNUP: ${PAPERWISE_DISABLE_SIGNUP:-false}
-      PAPERWISE_LLM_REQUEST_TIMEOUT_SECONDS: ${PAPERWISE_LLM_REQUEST_TIMEOUT_SECONDS:-}
+      DOCUPILOT_ENV: docker
+      DOCUPILOT_LOG_LEVEL: INFO
+      DOCUPILOT_REDIS_URL: redis://redis:6379/0
+      DOCUPILOT_REPOSITORY_BACKEND: postgres
+      DOCUPILOT_POSTGRES_URL: postgresql+psycopg://docupilot:docupilot@postgres:5432/docupilot
+      DOCUPILOT_OBJECT_STORE_ROOT: /data/object-store
+      DOCUPILOT_AUTH_SECRET: ${DOCUPILOT_AUTH_SECRET:-docupilot-change-me}
+      DOCUPILOT_SESSION_TTL_SECONDS: ${DOCUPILOT_SESSION_TTL_SECONDS:-43200}
+      DOCUPILOT_SESSION_COOKIE_SECURE: ${DOCUPILOT_SESSION_COOKIE_SECURE:-false}
+      DOCUPILOT_DISABLE_SIGNUP: ${DOCUPILOT_DISABLE_SIGNUP:-false}
+      DOCUPILOT_LLM_REQUEST_TIMEOUT_SECONDS: ${DOCUPILOT_LLM_REQUEST_TIMEOUT_SECONDS:-}
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
     volumes:
-      - paperwise_data:/data
+      - docupilot_data:/data
     restart: unless-stopped
 
   redis:
@@ -74,20 +74,20 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: paperwise
-      POSTGRES_PASSWORD: paperwise
-      POSTGRES_DB: paperwise
+      POSTGRES_USER: docupilot
+      POSTGRES_PASSWORD: docupilot
+      POSTGRES_DB: docupilot
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U paperwise -d paperwise"]
+      test: ["CMD-SHELL", "pg_isready -U docupilot -d docupilot"]
       interval: 10s
       timeout: 3s
       retries: 5
     restart: unless-stopped
 
 volumes:
-  paperwise_data:
+  docupilot_data:
   postgres_data:

@@ -1,11 +1,11 @@
 from datetime import UTC, datetime
 
-from paperwise.application.services.documents import (
+from docupilot.application.services.documents import (
     CreateDocumentCommand,
     create_document,
     delete_document,
 )
-from paperwise.domain.models import Document, DocumentStatus
+from docupilot.domain.models import Document, DocumentStatus
 
 
 class FakeRepository:

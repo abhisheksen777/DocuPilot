@@ -3,9 +3,9 @@ requires = ["setuptools>=69.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "paperwise"
+name = "docupilot"
 version = "0.10.0"
-description = "AI-native document management platform"
+description = "AI-powered document management and intelligence platform"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -37,7 +37,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-paperwise = [
+docupilot = [
   "server/static/*.html",
   "server/static/css/*",
   "server/static/icons/*",

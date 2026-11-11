@@ -1,4 +1,4 @@
-from paperwise.application.services.search_text import extract_search_snippet, tokenize_search_query
+from docupilot.application.services.search_text import extract_search_snippet, tokenize_search_query
 
 
 def test_tokenize_search_query_keeps_alphanumeric_terms() -> None:

@@ -1,9 +1,9 @@
 import json
 
-from paperwise.infrastructure.llm.gemini_llm_provider import GeminiLLMProvider, TOOL_CHAT_SYSTEM_PROMPT
-from paperwise.infrastructure.llm.grounded_qa_prompt import GROUNDED_QA_SYSTEM_PROMPT
-from paperwise.infrastructure.llm.metadata_prompt import SYSTEM_PROMPT
-from paperwise.infrastructure.llm.ocr_prompt import OCR_SYSTEM_PROMPT
+from docupilot.infrastructure.llm.gemini_llm_provider import GeminiLLMProvider, TOOL_CHAT_SYSTEM_PROMPT
+from docupilot.infrastructure.llm.grounded_qa_prompt import GROUNDED_QA_SYSTEM_PROMPT
+from docupilot.infrastructure.llm.metadata_prompt import SYSTEM_PROMPT
+from docupilot.infrastructure.llm.ocr_prompt import OCR_SYSTEM_PROMPT
 
 
 def test_gemini_provider_parses_json_response(monkeypatch) -> None:

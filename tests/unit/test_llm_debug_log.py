@@ -1,4 +1,4 @@
-from paperwise.infrastructure.llm.debug_log import _redact
+from docupilot.infrastructure.llm.debug_log import _redact
 
 
 def test_redact_keeps_usage_token_metrics() -> None:

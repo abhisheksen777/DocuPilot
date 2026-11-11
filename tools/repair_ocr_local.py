@@ -5,11 +5,11 @@ from dataclasses import dataclass
 import re
 from typing import Iterable
 
-from paperwise.application.services.parsing import parse_document_blob
-from paperwise.domain.models import Document, ParseResult
-from paperwise.infrastructure.config import get_settings
-from paperwise.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
-from paperwise.infrastructure.repositories.postgres_document_repository import PostgresDocumentRepository
+from docupilot.application.services.parsing import parse_document_blob
+from docupilot.domain.models import Document, ParseResult
+from docupilot.infrastructure.config import get_settings
+from docupilot.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
+from docupilot.infrastructure.repositories.postgres_document_repository import PostgresDocumentRepository
 
 
 BINARY_MARKERS = (

@@ -1,8 +1,8 @@
 import json
 
-from paperwise.infrastructure.llm.ocr_prompt import OCR_SYSTEM_PROMPT, extract_ocr_text_result
-from paperwise.infrastructure.llm.metadata_prompt import extract_metadata_result
-from paperwise.infrastructure.llm.openai_llm_provider import OpenAILLMProvider
+from docupilot.infrastructure.llm.ocr_prompt import OCR_SYSTEM_PROMPT, extract_ocr_text_result
+from docupilot.infrastructure.llm.metadata_prompt import extract_metadata_result
+from docupilot.infrastructure.llm.openai_llm_provider import OpenAILLMProvider
 
 
 def test_openai_provider_parses_json_response(monkeypatch) -> None:
@@ -619,7 +619,7 @@ def test_openai_provider_retries_rate_limited_tool_chat(monkeypatch) -> None:
 
     provider = OpenAILLMProvider(api_key="k", model="m")
     monkeypatch.setattr(provider, "_client", FakeClient())
-    monkeypatch.setattr("paperwise.infrastructure.llm.openai_llm_provider.time.sleep", sleeps.append)
+    monkeypatch.setattr("docupilot.infrastructure.llm.openai_llm_provider.time.sleep", sleeps.append)
 
     result = provider.answer_with_tools(messages=[{"role": "user", "content": "Hi"}], tools=[])
 

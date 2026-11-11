@@ -1,17 +1,17 @@
 ---
 title: Repository Layout
-description: High-level map of the Paperwise codebase.
+description: High-level map of the DocuPilot codebase.
 ---
 
 ## Main directories
 
-- `src/paperwise/server` — FastAPI entrypoint, static UI, and HTTP routes
-- `src/paperwise/workers` — Celery app and background tasks
-- `src/paperwise/domain` — core domain models and invariants
-- `src/paperwise/application` — use cases and provider interfaces
-- `src/paperwise/adapters` — provider implementations for LLM, OCR, search, and storage
-- `src/paperwise/infrastructure` — config and external integrations
-- `src/paperwise/events` — internal event contracts
+- `src/docupilot/server` — FastAPI entrypoint, static UI, and HTTP routes
+- `src/docupilot/workers` — Celery app and background tasks
+- `src/docupilot/domain` — core domain models and invariants
+- `src/docupilot/application` — use cases and provider interfaces
+- `src/docupilot/adapters` — provider implementations for LLM, OCR, search, and storage
+- `src/docupilot/infrastructure` — config and external integrations
+- `src/docupilot/events` — internal event contracts
 - `tests` — unit and integration tests
 - `tools` — maintenance scripts for migrations, repairs, reindexing, and smoke checks
 - `docs-src` — Starlight docs source
@@ -24,8 +24,8 @@ Uploaded files and processed artifacts live under the local object-store layout 
 
 ## User model
 
-Paperwise requires authenticated users. Guest access is disabled.
+DocuPilot requires authenticated users. Guest access is disabled.
 
 - `POST /users` creates a user
-- `POST /users/login` sets the `paperwise_session` cookie
-- document endpoints require a valid `paperwise_session` cookie
+- `POST /users/login` sets the `docupilot_session` cookie
+- document endpoints require a valid `docupilot_session` cookie

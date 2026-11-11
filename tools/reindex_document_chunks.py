@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import argparse
 
-from paperwise.application.services.chunk_indexing import index_document_chunks
-from paperwise.infrastructure.config import get_settings
-from paperwise.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
-from paperwise.infrastructure.repositories.postgres_document_repository import PostgresDocumentRepository
+from docupilot.application.services.chunk_indexing import index_document_chunks
+from docupilot.infrastructure.config import get_settings
+from docupilot.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
+from docupilot.infrastructure.repositories.postgres_document_repository import PostgresDocumentRepository
 
 
 def _build_repository():

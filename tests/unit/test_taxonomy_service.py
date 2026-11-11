@@ -1,4 +1,4 @@
-from paperwise.application.services.taxonomy import resolve_existing_name, resolve_tags
+from docupilot.application.services.taxonomy import resolve_existing_name, resolve_tags
 
 
 def test_resolve_existing_name_defaults_to_exact_matching() -> None:

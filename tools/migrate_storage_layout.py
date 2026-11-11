@@ -10,11 +10,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from paperwise.infrastructure.config import get_settings
-from paperwise.infrastructure.repositories.postgres_document_repository import (
+from docupilot.infrastructure.config import get_settings
+from docupilot.infrastructure.repositories.postgres_document_repository import (
     PostgresDocumentRepository,
 )
-from paperwise.application.services.storage_paths import path_to_blob_ref
+from docupilot.application.services.storage_paths import path_to_blob_ref
 
 
 def _sanitize_filename(value: str) -> str:

@@ -7,17 +7,17 @@ from zipfile import ZipFile
 import httpx
 from fastapi.testclient import TestClient
 
-from paperwise.application.services import llm_connection_test
-from paperwise.server.routes import documents as documents_routes
-from paperwise.server.dependencies import (
+from docupilot.application.services import llm_connection_test
+from docupilot.server.routes import documents as documents_routes
+from docupilot.server.dependencies import (
     current_user_dependency,
     document_repository_dependency,
     ingestion_dispatcher_dependency,
     llm_provider_dependency,
     storage_dependency,
 )
-from paperwise.server.main import app
-from paperwise.domain.models import (
+from docupilot.server.main import app
+from docupilot.domain.models import (
     Collection,
     DocumentChunk,
     DocumentHistoryEvent,
@@ -28,11 +28,11 @@ from paperwise.domain.models import (
     ParseResult,
     User,
 )
-from paperwise.domain.models import UserPreference
-from paperwise.infrastructure.repositories.in_memory_document_repository import (
+from docupilot.domain.models import UserPreference
+from docupilot.infrastructure.repositories.in_memory_document_repository import (
     InMemoryDocumentRepository,
 )
-from paperwise.infrastructure.storage.local_storage import LocalStorageAdapter
+from docupilot.infrastructure.storage.local_storage import LocalStorageAdapter
 
 
 class FakeDispatcher:
@@ -122,7 +122,7 @@ class FakeLLMProvider:
         del messages
         del tools
         self.tool_calls += 1
-        return {"role": "assistant", "content": "Paperwise model config test passed.", "tool_calls": []}
+        return {"role": "assistant", "content": "DocuPilot model config test passed.", "tool_calls": []}
 
 
 class FakeFailingLLMProvider:
@@ -469,7 +469,7 @@ def test_delete_document_removes_file_metadata_and_related_records() -> None:
                 document_id=document_id,
                 suggested_title="Delete Me",
                 document_date="2026-04-20",
-                correspondent="Paperwise",
+                correspondent="DocuPilot",
                 document_type="Statement",
                 tags=["Delete"],
                 created_correspondent=False,
@@ -1990,7 +1990,7 @@ def test_llm_connection_test_custom_task_runs_task_probe(monkeypatch) -> None:
                 "provider": "custom",
                 "model": "qwen3-0.6b",
                 "api_key": "lm-studio",
-                "base_url": "http://hyperion.local.zellux.me:1234/v1",
+                "base_url": "http://llm.example.test:1234/v1",
             },
         )
         assert response.status_code == 200
@@ -2033,7 +2033,7 @@ def test_llm_connection_test_ocr_requires_reading_test_image() -> None:
                 "provider": "custom",
                 "model": "qwen3-0.6b",
                 "api_key": "lm-studio",
-                "base_url": "http://hyperion.local.zellux.me:1234/v1",
+                "base_url": "http://llm.example.test:1234/v1",
             },
         )
         assert response.status_code == 502
@@ -2125,7 +2125,7 @@ def test_llm_connection_test_uses_models_endpoint_for_custom_provider(monkeypatc
                 "provider": "custom",
                 "model": "qwen3-0.6b",
                 "api_key": "lm-studio",
-                "base_url": "http://hyperion.local.zellux.me:1234/v1",
+                "base_url": "http://llm.example.test:1234/v1",
             },
         )
         assert response.status_code == 200
@@ -2133,7 +2133,7 @@ def test_llm_connection_test_uses_models_endpoint_for_custom_provider(monkeypatc
         assert payload["ok"] is True
         assert payload["provider"] == "custom"
         assert payload["model"] == "qwen3-0.6b"
-        assert captured["base_url"] == "http://hyperion.local.zellux.me:1234/v1"
+        assert captured["base_url"] == "http://llm.example.test:1234/v1"
         assert captured["paths"] == ["/models"]
     finally:
         app.dependency_overrides.clear()

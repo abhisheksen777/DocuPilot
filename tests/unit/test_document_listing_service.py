@@ -1,8 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
-from paperwise.application.services.document_listing import list_filtered_documents
-from paperwise.domain.models import Document, DocumentStatus, ParseResult, User
-from paperwise.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
+from docupilot.application.services.document_listing import list_filtered_documents
+from docupilot.domain.models import Document, DocumentStatus, ParseResult, User
+from docupilot.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
 
 
 class SpyDocumentRepository(InMemoryDocumentRepository):

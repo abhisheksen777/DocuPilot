@@ -7,9 +7,9 @@ from pathlib import Path
 
 def test_all_static_assets_are_declared_as_package_data() -> None:
     project_root = Path(__file__).resolve().parents[2]
-    package_root = project_root / "src" / "paperwise"
+    package_root = project_root / "src" / "docupilot"
     pyproject = tomllib.loads((project_root / "pyproject.toml").read_text())
-    package_data = pyproject["tool"]["setuptools"]["package-data"]["paperwise"]
+    package_data = pyproject["tool"]["setuptools"]["package-data"]["docupilot"]
 
     missing = []
     for asset_path in (package_root / "server" / "static").rglob("*"):
@@ -25,7 +25,7 @@ def test_all_static_assets_are_declared_as_package_data() -> None:
 def test_pdf_viewer_syncs_navigation_with_loaded_pdf_page_count() -> None:
     project_root = Path(__file__).resolve().parents[2]
     viewer_script = (
-        project_root / "src" / "paperwise" / "server" / "static" / "js" / "single-document.js"
+        project_root / "src" / "docupilot" / "server" / "static" / "js" / "single-document.js"
     ).read_text()
 
     assert "pdfDocument?.numPages" in viewer_script

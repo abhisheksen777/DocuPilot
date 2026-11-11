@@ -1,5 +1,5 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://paperwise.dev/sitemap.xml
-Sitemap: https://paperwise.dev/docs/sitemap-index.xml
+Sitemap: https://docupilot.example.com/sitemap.xml
+Sitemap: https://docupilot.example.com/docs/sitemap-index.xml

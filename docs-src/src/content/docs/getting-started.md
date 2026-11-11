@@ -1,11 +1,11 @@
 ---
 title: Getting Started
-description: Start Paperwise with Docker Compose, then finish the required first-run model setup.
+description: Start DocuPilot with Docker Compose, then finish the required first-run model setup.
 ---
 
 For most self-hosted installs, start with Docker Compose.
 
-If you want to run Paperwise from source or contribute to the codebase, see [Dev Environment Setup](/docs/reference/local-development/).
+If you want to run DocuPilot from source or contribute to the codebase, see [Dev Environment Setup](/docs/reference/local-development/).
 
 ## Docker Compose
 
@@ -18,8 +18,8 @@ Use the repository root `docker compose` stack when you want the shortest path t
 ### Start the stack
 
 ```bash
-mkdir paperwise
-cd paperwise
+mkdir docupilot
+cd docupilot
 ```
 
 Create a `docker-compose.yml` file with the published image, then replace `replace-with-a-strong-secret` with your own secret:
@@ -27,18 +27,18 @@ Create a `docker-compose.yml` file with the published image, then replace `repla
 ```yaml
 services:
   api:
-    image: ghcr.io/zellux/paperwise:latest
+    image: ghcr.io/abhisheksen777/docupilot:latest
     environment:
-      PAPERWISE_ENV: docker
-      PAPERWISE_LOG_LEVEL: INFO
-      PAPERWISE_API_HOST: 0.0.0.0
-      PAPERWISE_API_PORT: 8000
-      PAPERWISE_REDIS_URL: redis://redis:6379/0
-      PAPERWISE_REPOSITORY_BACKEND: postgres
-      PAPERWISE_POSTGRES_URL: postgresql+psycopg://paperwise:paperwise@postgres:5432/paperwise
-      PAPERWISE_OBJECT_STORE_ROOT: /data/object-store
-      PAPERWISE_AUTH_SECRET: replace-with-a-strong-secret
-      PAPERWISE_SESSION_TTL_SECONDS: "43200"
+      DOCUPILOT_ENV: docker
+      DOCUPILOT_LOG_LEVEL: INFO
+      DOCUPILOT_API_HOST: 0.0.0.0
+      DOCUPILOT_API_PORT: 8000
+      DOCUPILOT_REDIS_URL: redis://redis:6379/0
+      DOCUPILOT_REPOSITORY_BACKEND: postgres
+      DOCUPILOT_POSTGRES_URL: postgresql+psycopg://docupilot:docupilot@postgres:5432/docupilot
+      DOCUPILOT_OBJECT_STORE_ROOT: /data/object-store
+      DOCUPILOT_AUTH_SECRET: replace-with-a-strong-secret
+      DOCUPILOT_SESSION_TTL_SECONDS: "43200"
     depends_on:
       redis:
         condition: service_healthy
@@ -47,7 +47,7 @@ services:
     ports:
       - "8080:8000"
     volumes:
-      - paperwise_data:/data
+      - docupilot_data:/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
       interval: 15s
@@ -57,24 +57,24 @@ services:
     restart: unless-stopped
 
   worker:
-    image: ghcr.io/zellux/paperwise:latest
-    command: ["celery", "-A", "paperwise.workers.celery_app.celery_app", "worker", "--loglevel=INFO"]
+    image: ghcr.io/abhisheksen777/docupilot:latest
+    command: ["celery", "-A", "docupilot.workers.celery_app.celery_app", "worker", "--loglevel=INFO"]
     environment:
-      PAPERWISE_ENV: docker
-      PAPERWISE_LOG_LEVEL: INFO
-      PAPERWISE_REDIS_URL: redis://redis:6379/0
-      PAPERWISE_REPOSITORY_BACKEND: postgres
-      PAPERWISE_POSTGRES_URL: postgresql+psycopg://paperwise:paperwise@postgres:5432/paperwise
-      PAPERWISE_OBJECT_STORE_ROOT: /data/object-store
-      PAPERWISE_AUTH_SECRET: replace-with-a-strong-secret
-      PAPERWISE_SESSION_TTL_SECONDS: "43200"
+      DOCUPILOT_ENV: docker
+      DOCUPILOT_LOG_LEVEL: INFO
+      DOCUPILOT_REDIS_URL: redis://redis:6379/0
+      DOCUPILOT_REPOSITORY_BACKEND: postgres
+      DOCUPILOT_POSTGRES_URL: postgresql+psycopg://docupilot:docupilot@postgres:5432/docupilot
+      DOCUPILOT_OBJECT_STORE_ROOT: /data/object-store
+      DOCUPILOT_AUTH_SECRET: replace-with-a-strong-secret
+      DOCUPILOT_SESSION_TTL_SECONDS: "43200"
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
     volumes:
-      - paperwise_data:/data
+      - docupilot_data:/data
     restart: unless-stopped
 
   redis:
@@ -89,20 +89,20 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: paperwise
-      POSTGRES_PASSWORD: paperwise
-      POSTGRES_DB: paperwise
+      POSTGRES_USER: docupilot
+      POSTGRES_PASSWORD: docupilot
+      POSTGRES_DB: docupilot
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U paperwise -d paperwise"]
+      test: ["CMD-SHELL", "pg_isready -U docupilot -d docupilot"]
       interval: 10s
       timeout: 3s
       retries: 5
     restart: unless-stopped
 
 volumes:
-  paperwise_data:
+  docupilot_data:
   postgres_data:
 ```
 
@@ -112,7 +112,7 @@ Start the stack:
 docker compose up -d
 ```
 
-Open Paperwise at `http://localhost:8080`.
+Open DocuPilot at `http://localhost:8080`.
 
 ### Before sharing
 
@@ -128,7 +128,7 @@ Before you hand this off to other users, verify a clean deploy end to end:
 
 New images are published automatically when changes land on `main`.
 
-To update a running server that uses `ghcr.io/zellux/paperwise:latest`:
+To update a running server that uses `ghcr.io/abhisheksen777/docupilot:latest`:
 
 ```bash
 docker compose pull
@@ -138,7 +138,7 @@ docker compose up -d
 To pin a specific release, replace the image tag, for example:
 
 ```yaml
-image: ghcr.io/zellux/paperwise:v0.1.1
+image: ghcr.io/abhisheksen777/docupilot:v0.1.1
 ```
 
 Then update by changing the tag in `docker-compose.yml` and running:
@@ -153,14 +153,14 @@ docker compose up -d
 Back up both persistent data locations:
 
 - `postgres_data` for users, preferences, document records, and search metadata
-- `paperwise_data` for uploaded files and extracted object-store data
+- `docupilot_data` for uploaded files and extracted object-store data
 
 If you only back up one of them, restore will be incomplete.
 
 For a safe upgrade path:
 
 1. Back up `postgres_data`.
-2. Back up `paperwise_data`.
+2. Back up `docupilot_data`.
 3. Run `docker compose pull`.
 4. Run `docker compose up -d`.
 
@@ -178,7 +178,7 @@ For a safe upgrade path:
 
 After the app is running, there is one more required step: configure model connections in the web UI.
 
-1. Create your first account or sign in. Paperwise has no guest mode.
+1. Create your first account or sign in. DocuPilot has no guest mode.
 2. Open **Settings > Model Config**.
 3. Add one or more model connections.
 4. Assign task models for metadata extraction, grounded Q&A, and OCR.
@@ -217,6 +217,6 @@ If upload works but extraction or Ask My Docs fails:
 
 ## Want to run from source?
 
-If you plan to modify the code, debug the internals, or run Paperwise without Docker for the app processes, follow [Dev Environment Setup](/docs/reference/local-development/).
+If you plan to modify the code, debug the internals, or run DocuPilot without Docker for the app processes, follow [Dev Environment Setup](/docs/reference/local-development/).
 
 Next: [Model Config](/docs/model-config/)

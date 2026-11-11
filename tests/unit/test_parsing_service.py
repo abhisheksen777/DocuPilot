@@ -3,8 +3,8 @@ from zipfile import ZipFile
 
 import pytest
 
-from paperwise.application.services import parsing as parsing_module
-from paperwise.application.services.parsing import parse_document_blob
+from docupilot.application.services import parsing as parsing_module
+from docupilot.application.services.parsing import parse_document_blob
 
 
 def _write_xlsx_fixture(path: Path) -> None:
@@ -436,7 +436,7 @@ def test_parse_document_blob_doc_uses_direct_binary_text_fallback(tmp_path, monk
 
 def test_parse_document_blob_csv_extracts_rows_without_llm_ocr(tmp_path) -> None:
     blob = tmp_path / "ledger.csv"
-    blob.write_text('Name,Amount,Note\n"Paperwise, Inc.",19.95,"CSV cell"\n', encoding="utf-8")
+    blob.write_text('Name,Amount,Note\n"DocuPilot, Inc.",19.95,"CSV cell"\n', encoding="utf-8")
     llm = RecordingOCRLLM("")
 
     result = parse_document_blob(
@@ -450,14 +450,14 @@ def test_parse_document_blob_csv_extracts_rows_without_llm_ocr(tmp_path) -> None
     assert llm.calls == 0
     assert result.parser == "direct-text-parser"
     assert "Name\tAmount\tNote" in result.text_preview
-    assert "Paperwise, Inc.\t19.95\tCSV cell" in result.text_preview
+    assert "DocuPilot, Inc.\t19.95\tCSV cell" in result.text_preview
     assert result.ocr_details is not None
     assert result.ocr_details["final_text_source"] == "delimited_text_read"
 
 
 def test_parse_document_blob_tsv_extracts_rows_without_llm_ocr(tmp_path) -> None:
     blob = tmp_path / "ledger.tsv"
-    blob.write_text("Name\tAmount\nPaperwise\t24.00\n", encoding="utf-8")
+    blob.write_text("Name\tAmount\nDocuPilot\t24.00\n", encoding="utf-8")
     llm = RecordingOCRLLM("")
 
     result = parse_document_blob(
@@ -471,7 +471,7 @@ def test_parse_document_blob_tsv_extracts_rows_without_llm_ocr(tmp_path) -> None
     assert llm.calls == 0
     assert result.parser == "direct-text-parser"
     assert "Name\tAmount" in result.text_preview
-    assert "Paperwise\t24.00" in result.text_preview
+    assert "DocuPilot\t24.00" in result.text_preview
 
 
 def test_parse_document_blob_xlsx_extracts_sheet_cell_text_without_llm_ocr(tmp_path) -> None:

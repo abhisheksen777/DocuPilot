@@ -4,9 +4,9 @@ from zipfile import ZipFile
 
 from pypdf import PdfWriter
 
-from paperwise.application.services import source_dates as source_dates_module
-from paperwise.application.services.source_dates import extract_source_document_date
-from paperwise.domain.models import Document, DocumentStatus
+from docupilot.application.services import source_dates as source_dates_module
+from docupilot.application.services.source_dates import extract_source_document_date
+from docupilot.domain.models import Document, DocumentStatus
 
 
 def _document_for_path(path) -> Document:

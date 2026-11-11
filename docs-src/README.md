@@ -1,6 +1,6 @@
-# Paperwise Docs
+# DocuPilot Docs
 
-This directory contains the Starlight source for the Paperwise docs site.
+This directory contains the Starlight source for the DocuPilot docs site.
 
 Built static output is written to `../website/docs` so the generated docs can ship as part of
 the main `website/` directory.

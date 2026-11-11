@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from paperwise.infrastructure.config import Settings
-from paperwise.server.dependencies import document_repository_dependency, settings_dependency
-from paperwise.server.main import app
-from paperwise.infrastructure.repositories.in_memory_document_repository import (
+from docupilot.infrastructure.config import Settings
+from docupilot.server.dependencies import document_repository_dependency, settings_dependency
+from docupilot.server.main import app
+from docupilot.infrastructure.repositories.in_memory_document_repository import (
     InMemoryDocumentRepository,
 )
 
@@ -154,7 +154,7 @@ def test_login_user_success_and_failure() -> None:
         login_payload = good_login.json()
         assert set(login_payload) == {"user"}
         assert login_payload["user"]["email"] == "login@example.com"
-        assert good_login.cookies.get("paperwise_session")
+        assert good_login.cookies.get("docupilot_session")
 
         me_response = client.get("/users/me")
         assert me_response.status_code == 200
@@ -165,7 +165,7 @@ def test_login_user_success_and_failure() -> None:
 
         logout_response = client.post("/users/logout")
         assert logout_response.status_code == 204
-        assert logout_response.headers["set-cookie"].startswith("paperwise_session=\"\";")
+        assert logout_response.headers["set-cookie"].startswith("docupilot_session=\"\";")
     finally:
         app.dependency_overrides.clear()
 

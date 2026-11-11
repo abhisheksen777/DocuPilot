@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from paperwise.infrastructure.dispatchers.celery_ingestion_dispatcher import (
+from docupilot.infrastructure.dispatchers.celery_ingestion_dispatcher import (
     CeleryIngestionDispatcher,
 )
 
@@ -15,7 +15,7 @@ def test_celery_ingestion_dispatcher_enqueues_and_returns_job_id(monkeypatch) ->
             return SimpleNamespace(id="celery-job-1")
 
     monkeypatch.setattr(
-        "paperwise.infrastructure.dispatchers.celery_ingestion_dispatcher.ingest_document_task",
+        "docupilot.infrastructure.dispatchers.celery_ingestion_dispatcher.ingest_document_task",
         FakeTask,
     )
 
@@ -46,7 +46,7 @@ def test_celery_ingestion_dispatcher_enqueues_reindex(monkeypatch) -> None:
             return SimpleNamespace(id="celery-reindex-1")
 
     monkeypatch.setattr(
-        "paperwise.infrastructure.dispatchers.celery_ingestion_dispatcher.reindex_document_task",
+        "docupilot.infrastructure.dispatchers.celery_ingestion_dispatcher.reindex_document_task",
         FakeTask,
     )
 

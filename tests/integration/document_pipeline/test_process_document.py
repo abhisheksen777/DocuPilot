@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
 
-from paperwise.application.services.document_pipeline import process_document
-from paperwise.domain.models import Document, DocumentStatus, HistoryActorType, ParseResult
-from paperwise.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
+from docupilot.application.services.document_pipeline import process_document
+from docupilot.domain.models import Document, DocumentStatus, HistoryActorType, ParseResult
+from docupilot.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
 
 
 class FakeMetadataLLMProvider:
@@ -54,7 +54,7 @@ def test_process_document_persists_outputs_history_chunks_and_processed_blob(tmp
         )
 
     monkeypatch.setattr(
-        "paperwise.application.services.document_pipeline.parse_document_blob",
+        "docupilot.application.services.document_pipeline.parse_document_blob",
         fake_parse_document_blob,
     )
 

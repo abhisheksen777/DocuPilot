@@ -3,11 +3,11 @@ import logging
 
 from fastapi.testclient import TestClient
 
-from paperwise.application.services.chunk_indexing import index_document_chunks
-from paperwise.application.services.chat_contexts import compact_chat_context_content
-from paperwise.application.services.document_scope import all_owned_document_ids
-from paperwise.application.services.grounded_qa import build_qa_contexts
-from paperwise.domain.models import (
+from docupilot.application.services.chunk_indexing import index_document_chunks
+from docupilot.application.services.chat_contexts import compact_chat_context_content
+from docupilot.application.services.document_scope import all_owned_document_ids
+from docupilot.application.services.grounded_qa import build_qa_contexts
+from docupilot.domain.models import (
     Document,
     DocumentChunk,
     DocumentChunkSearchHit,
@@ -17,13 +17,13 @@ from paperwise.domain.models import (
     User,
     UserPreference,
 )
-from paperwise.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
-from paperwise.server.dependencies import (
+from docupilot.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
+from docupilot.server.dependencies import (
     current_user_dependency,
     document_repository_dependency,
     llm_provider_dependency,
 )
-from paperwise.server.main import app
+from docupilot.server.main import app
 
 
 TEST_USER = User(
@@ -698,12 +698,12 @@ def test_chat_debug_timing_logs_do_not_include_query_or_result_payload(caplog, m
         llm_debug_records.append(kwargs)
 
     monkeypatch.setattr(
-        "paperwise.application.services.chat_runtime.log_llm_exchange",
+        "docupilot.application.services.chat_runtime.log_llm_exchange",
         record_llm_debug_exchange,
     )
 
     try:
-        caplog.set_level(logging.DEBUG, logger="paperwise.application.services.chat_runtime")
+        caplog.set_level(logging.DEBUG, logger="docupilot.application.services.chat_runtime")
         client = TestClient(app)
         response = client.post(
             "/query/chat",
@@ -1285,7 +1285,7 @@ def test_initial_search_citations_and_coverage_survive_followup() -> None:
 
 
 def test_chat_tool_filters_cannot_escape_explicit_scope() -> None:
-    from paperwise.application.services.chat_tools import ChatToolScope, execute_chat_tool
+    from docupilot.application.services.chat_tools import ChatToolScope, execute_chat_tool
 
     repository = InMemoryDocumentRepository()
     for doc_id, tag, date in [("selected", "Utilities", "2026-03-10"), ("other-tag", "Medical", "2026-03-10"), ("old", "Utilities", "2025-01-01")]:
@@ -1326,7 +1326,7 @@ def test_chat_evidence_and_library_are_owner_scoped() -> None:
 def test_chat_scope_rejects_invalid_dates() -> None:
     import pytest
     from pydantic import ValidationError
-    from paperwise.server.schemas.chat import ChatScopeRequest
+    from docupilot.server.schemas.chat import ChatScopeRequest
 
     for values in [{"date_from": "yesterday"}, {"date_from": "2026-04-01", "date_to": "2026-03-01"}]:
         with pytest.raises(ValidationError):
@@ -1334,8 +1334,8 @@ def test_chat_scope_rejects_invalid_dates() -> None:
 
 
 def test_chat_stream_delivers_answer_deltas_before_final() -> None:
-    from paperwise.application.services.chat_runtime import iter_chat_runtime_events
-    from paperwise.application.services.chat_tools import ChatToolScope
+    from docupilot.application.services.chat_runtime import iter_chat_runtime_events
+    from docupilot.application.services.chat_tools import ChatToolScope
 
     class StreamingAnswer(FakeGroundedLLM):
         def answer_with_tools(self, **kwargs):
@@ -1357,9 +1357,9 @@ def test_chat_stream_delivers_answer_deltas_before_final() -> None:
 
 def test_disconnected_chat_does_not_save_final_answer(monkeypatch) -> None:
     import asyncio
-    from paperwise.application.services.chat_runtime import ChatRuntimeEvent, ChatRuntimeResult
-    from paperwise.server.routes import query
-    from paperwise.server.schemas.chat import ChatRequest
+    from docupilot.application.services.chat_runtime import ChatRuntimeEvent, ChatRuntimeResult
+    from docupilot.server.routes import query
+    from docupilot.server.schemas.chat import ChatRequest
 
     repository = InMemoryDocumentRepository()
     final = ChatRuntimeResult(content="Answer", tool_payloads=[], tool_calls=[], token_usage={}, debug_steps=[])
@@ -1382,8 +1382,8 @@ def test_disconnected_chat_does_not_save_final_answer(monkeypatch) -> None:
 
 
 def test_bounded_followup_preserves_earlier_history_and_evidence() -> None:
-    from paperwise.application.services.chat_threads import save_chat_thread_turn
-    from paperwise.domain.models import ChatThread
+    from docupilot.application.services.chat_threads import save_chat_thread_turn
+    from docupilot.domain.models import ChatThread
 
     repository = InMemoryDocumentRepository()
     messages = []

@@ -1,287 +1,128 @@
-# Paperwise
+# DocuPilot
 
-Paperwise is an open-source, self-hosted document intelligence app for OCR, metadata extraction, document organization, and grounded Q&A.
+**AI-powered document management and intelligence platform.**
 
-Website: [paperwise.dev](https://paperwise.dev)
+DocuPilot is a self-hosted app for OCR, automatic metadata extraction, document organization and grounded Q&A across your documents.
 
-Docs:
-- [Getting started](https://paperwise.dev/docs/getting-started/)
-- [Model config](https://paperwise.dev/docs/model-config/)
-- [Q&A](https://paperwise.dev/docs/support/)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 
-## Quick start
+## Features
 
-### What you need
+- **Upload and organize** PDFs and scanned documents
+- **OCR** with an LLM or local Tesseract
+- **Automatic metadata extraction** — titles, dates, tags and categories
+- **Ask My Docs** — grounded Q&A with answers cited from your own documents
+- **Full-text search** powered by PostgreSQL, with per-document index status and batch reindexing
+- **Bring your own model** — OpenAI, Gemini or any OpenAI-compatible endpoint (LM Studio, llama.cpp, etc.)
+- **Mobile app support** through a Paperless-compatible API
+- **Multi-user** accounts with session auth and optional signup lock
 
-- Docker Engine or Docker Desktop with Compose support
-- At least one model provider key for metadata extraction and grounded Q&A
-- Optional: `tesseract` if you want OCR to stay local instead of using an LLM for OCR
+## Tech Stack
 
-The GitHub Actions publish workflow pushes images to:
+| Layer | Tools |
+|---|---|
+| Backend | Python, FastAPI, SQLAlchemy, Pydantic |
+| Background jobs | Celery, Redis |
+| Storage | PostgreSQL, local object store |
+| AI | OpenAI, Google Gemini, OpenAI-compatible APIs |
+| PDF | pypdf, PDF.js viewer |
+| Tooling | uv, Ruff, pytest, Docker Compose |
 
-```text
-ghcr.io/zellux/paperwise
+## Architecture
+
+```mermaid
+flowchart LR
+    U["Browser / Mobile app"] --> A["FastAPI API"]
+    A --> P[("PostgreSQL")]
+    A --> R[("Redis")]
+    R --> W["Celery worker"]
+    W --> O["OCR + metadata extraction"]
+    W --> I["Search indexing"]
+    O --> L["LLM provider"]
+    W --> P
+    A --> S[("Object store")]
 ```
 
-Create a `docker-compose.yml` file:
-
-```yaml
-services:
-  api:
-    image: ghcr.io/zellux/paperwise:latest
-    environment:
-      PAPERWISE_ENV: docker
-      PAPERWISE_LOG_LEVEL: INFO
-      PAPERWISE_API_HOST: 0.0.0.0
-      PAPERWISE_API_PORT: 8000
-      PAPERWISE_REDIS_URL: redis://redis:6379/0
-      PAPERWISE_REPOSITORY_BACKEND: postgres
-      PAPERWISE_POSTGRES_URL: postgresql+psycopg://paperwise:paperwise@postgres:5432/paperwise
-      PAPERWISE_OBJECT_STORE_ROOT: /data/object-store
-      PAPERWISE_AUTH_SECRET: replace-with-a-strong-secret
-      PAPERWISE_SESSION_TTL_SECONDS: "43200"
-      PAPERWISE_SESSION_COOKIE_SECURE: "false"
-      PAPERWISE_DISABLE_SIGNUP: "false"
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    ports:
-      - "8080:8000"
-    volumes:
-      - paperwise_data:/data
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    restart: unless-stopped
-
-  worker:
-    image: ghcr.io/zellux/paperwise:latest
-    command: ["sh", "-c", "exec celery -A paperwise.workers.celery_app.celery_app worker --loglevel=INFO ${PAPERWISE_WORKER_CONCURRENCY:+--concurrency=${PAPERWISE_WORKER_CONCURRENCY}}"]
-    environment:
-      PAPERWISE_ENV: docker
-      PAPERWISE_LOG_LEVEL: INFO
-      PAPERWISE_REDIS_URL: redis://redis:6379/0
-      PAPERWISE_REPOSITORY_BACKEND: postgres
-      PAPERWISE_POSTGRES_URL: postgresql+psycopg://paperwise:paperwise@postgres:5432/paperwise
-      PAPERWISE_OBJECT_STORE_ROOT: /data/object-store
-      PAPERWISE_AUTH_SECRET: replace-with-a-strong-secret
-      PAPERWISE_SESSION_TTL_SECONDS: "43200"
-      PAPERWISE_SESSION_COOKIE_SECURE: "false"
-      PAPERWISE_DISABLE_SIGNUP: "false"
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    volumes:
-      - paperwise_data:/data
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: paperwise
-      POSTGRES_PASSWORD: paperwise
-      POSTGRES_DB: paperwise
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U paperwise -d paperwise"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
-volumes:
-  paperwise_data:
-  postgres_data:
-```
-
-Start the stack:
+## Quick Start (Docker)
 
 ```bash
-docker compose up -d
+git clone https://github.com/abhisheksen777/DocuPilot.git
+cd DocuPilot
+export DOCUPILOT_AUTH_SECRET=your-strong-secret
+make docker-up
 ```
 
-Before starting, replace `replace-with-a-strong-secret` with your own secret in both `api` and `worker`.
+Open http://localhost:8080.
 
-The example is configured for direct HTTP access at `http://localhost:8080`. If you put Paperwise behind HTTPS, set `PAPERWISE_SESSION_COOKIE_SECURE` to `"true"` in both `api` and `worker`.
-
-Set `PAPERWISE_DISABLE_SIGNUP` to `"true"` on the `api` service to disable public self-service account registration while keeping login available for existing users.
-
-Set `PAPERWISE_WORKER_CONCURRENCY` to a positive integer before running `docker compose up -d` if you need to limit worker parallelism for a local or rate-limited model backend, for example `PAPERWISE_WORKER_CONCURRENCY=1`. When unset, Celery keeps its default concurrency behavior.
-
-For slower model backends, set `PAPERWISE_LLM_REQUEST_TIMEOUT_SECONDS` to a positive number of seconds (for example `300`) in both `api` and `worker` environments. It applies to OpenAI, Gemini, and custom OpenAI-compatible model requests, including streaming Q&A. When unset or empty, existing defaults remain: 30 seconds for ordinary requests and 120 seconds for long-running requests. The checked-in compose file forwards this variable to both services. Restart both services after changing it. **Test Connection** keeps its separate 10-second connectivity check.
-
-If the GHCR package is private, make it public in the GitHub package settings before sharing it with other users.
-
-Open Paperwise at [http://localhost:8080](http://localhost:8080).
-
-## Mobile app support
-
-Paperwise exposes a Paperless-compatible API for the open-source [Paperless Mobile](https://github.com/astubenbord/paperless-mobile) app. Point the mobile app at your Paperwise server URL and sign in with your Paperwise account to browse, search, filter, and upload documents.
-
-Compatibility currently targets the core mobile workflows rather than the complete Paperless-ngx API surface.
-
-The compatible `GET /api/trash/` endpoint returns an empty paginated collection for clients that request it during full sync. Paperwise currently deletes documents permanently and does not support trash retention or restore.
+To run the published image instead of building locally, use `make docker-deploy-up` (uses `docker-compose.deploy.yml`).
 
 ## Run From Source
 
-For local development after cloning the repo:
-
 ```bash
-git clone https://github.com/zellux/paperwise.git
-cd paperwise
 make setup
 make dev-up
 ```
 
-Open the app at [http://localhost:8000](http://localhost:8000).
-
-Useful local commands:
+Open http://localhost:8000. This starts the API, Celery worker, Redis and PostgreSQL. Local data lives under `local/`.
 
 ```bash
-make dev-status
-make dev-stop
-uv run pytest
+make dev-status   # check services
+make dev-stop     # stop everything
+make test         # run tests
 ```
 
-The local dev stack starts the FastAPI app, Celery worker, Redis, and Postgres. Uploaded files and local runtime data are stored under `local/`.
+## First-Run Setup
 
-### Document retrieval index
+1. Create your account.
+2. Open **Settings → Model Config**.
+3. Add an **OpenAI**, **Gemini** or **Custom (OpenAI-compatible)** connection.
+4. Assign models for **Metadata Extraction**, **Grounded Q&A** and **OCR**.
+5. Upload a few documents and try **Ask My Docs**.
 
-Document chunks are indexed with PostgreSQL full-text search. On PostgreSQL, Paperwise creates a GIN expression index and ranks matching chunks in the database; SQLite-backed local or test runs use a compatible in-process fallback. Qdrant is not required for this retrieval layer.
+> Running a local model server on the Docker host? Use `http://host.docker.internal:<port>/v1` instead of `localhost`.
 
-Each document exposes an independent index status (`not_indexed`, `pending`, `indexing`, `ready`, `stale`, or `failed`). Select documents in the Documents view and use **Reindex** to rebuild them in the Celery worker without repeating OCR or metadata extraction. The same operation is available through `POST /documents/index/batch`, while detailed index state is included in the existing `GET /documents/{document_id}/detail` response.
+## Configuration
 
-For local source runs, set `PAPERWISE_WORKER_CONCURRENCY` before `make worker` or `make dev-up` to limit Celery worker concurrency.
+| Variable | Purpose |
+|---|---|
+| `DOCUPILOT_AUTH_SECRET` | Session signing secret — **change this** |
+| `DOCUPILOT_POSTGRES_URL` | PostgreSQL connection string |
+| `DOCUPILOT_REDIS_URL` | Redis connection string |
+| `DOCUPILOT_OBJECT_STORE_ROOT` | Where uploaded files are stored |
+| `DOCUPILOT_SESSION_COOKIE_SECURE` | `true` behind HTTPS, `false` over plain HTTP |
+| `DOCUPILOT_DISABLE_SIGNUP` | `true` to block new registrations |
+| `DOCUPILOT_WORKER_CONCURRENCY` | Limit worker parallelism (e.g. `1` for local models) |
+| `DOCUPILOT_LLM_REQUEST_TIMEOUT_SECONDS` | Timeout for slow model backends |
 
-## Before Sharing
+## Project Structure
 
-Before you hand this off to other users, it is worth checking five things on a clean deploy:
-
-1. Sign up and sign in both work.
-2. Saving **Settings > Model Config** succeeds.
-3. Uploading a document moves it out of `processing`.
-4. The worker is running and document jobs complete.
-5. **Ask My Docs** returns an answer for at least one test document.
-
-## Updating
-
-New images are published automatically when changes land on `main`.
-
-To update a running server that uses `ghcr.io/zellux/paperwise:latest`:
-
-```bash
-docker compose pull
-docker compose up -d
+```
+src/docupilot/
+├── domain/          # Core entities
+├── application/     # Use cases and services
+├── adapters/        # LLM, OCR and storage adapters
+├── infrastructure/  # Database and config
+├── server/          # FastAPI app, templates, static UI
+└── workers/         # Celery tasks
 ```
 
 ## Backups
 
-Back up both persistent data locations:
-
-- `postgres_data` for users, preferences, document records, and search metadata
-- `paperwise_data` for uploaded files and extracted object-store data
-
-If you only back up one of them, restore will be incomplete.
-
-For a safe upgrade path:
-
-1. Back up `postgres_data`.
-2. Back up `paperwise_data`.
-3. Run `docker compose pull`.
-4. Run `docker compose up -d`.
-
-## First-run setup
-
-After the app is running:
-
-1. Create your first account.
-2. Open **Settings > Model Config**.
-3. Add an **OpenAI**, **Gemini**, or **Custom (OpenAI-compatible)** connection.
-4. Assign models for:
-   - **Metadata Extraction**
-   - **Grounded Q&A**
-   - **OCR**
-5. Upload a few documents and test extraction or Ask My Docs.
-
-If Paperwise runs in Docker and your local model server runs on the Docker host, do not use `localhost` in **Model Config**. Use `host.docker.internal`, for example `http://host.docker.internal:1234/v1`. Both the `api` and `worker` containers need access because settings tests run in the API and document processing runs in the worker.
-
-## Suggested starting setup
-
-- **Metadata extraction**: a fast general-purpose model
-- **Grounded Q&A**: a stronger reasoning model if you need cross-document answers
-- **OCR**:
-  - use **LLM OCR** for scans, forms, or image-heavy PDFs
-  - use **Local Tesseract** if you want OCR to stay on your machine
-
-For more detail, use the docs:
-- [Getting started](https://paperwise.dev/docs/getting-started/)
-- [Model config](https://paperwise.dev/docs/model-config/)
-- [Q&A](https://paperwise.dev/docs/support/)
-
-## Common commands
-
-```bash
-docker compose ps
-docker compose logs -f api worker
-docker compose logs -f postgres redis
-docker compose pull
-docker compose down
-```
+Back up both volumes — the PostgreSQL data (users, records, search index) and the DocuPilot data volume (uploaded files). Restoring only one leaves the app incomplete.
 
 ## Troubleshooting
 
-If sign-in succeeds but the app immediately shows the sign-in screen again:
+- **Logged in but bounced back to sign-in** — set `DOCUPILOT_SESSION_COOKIE_SECURE` to match your protocol (HTTP → `false`, HTTPS → `true`) on both `api` and `worker`.
+- **Uploads stuck in `processing`** — make sure the worker is running and Redis is healthy: `docker compose logs -f api worker`.
+- **High CPU while processing** — switch OCR away from Local Tesseract or set `DOCUPILOT_WORKER_CONCURRENCY=1`.
 
-- if you serve Paperwise over plain HTTP, set `PAPERWISE_SESSION_COOKIE_SECURE` to `"false"` in both `api` and `worker`
-- if you serve Paperwise behind HTTPS, set `PAPERWISE_SESSION_COOKIE_SECURE` to `"true"` in both `api` and `worker`
-- run `docker compose pull`
-- run `docker compose up -d` so the containers are recreated with the new image and environment
-- clear the site's browser cookies if an old session is still cached
+## Author
 
-This happens when a browser receives a `Secure` session cookie over HTTP. The browser will not send that cookie back, so login appears to work but the next request is unauthenticated. New Paperwise images support `PAPERWISE_SESSION_COOKIE_SECURE`; already-deployed hosts still need their local `docker-compose.yml` and running containers updated.
-
-If uploads stay stuck in `processing`:
-
-- check that the `worker` container is running
-- inspect `docker compose logs -f api worker`
-- make sure Redis is healthy and reachable
-
-If CPU usage spikes while documents are processing:
-
-- local OCR is the most likely cause, especially when **Local Tesseract** is enabled
-- set `PAPERWISE_WORKER_CONCURRENCY` to a positive integer, such as `1`, before starting the worker if your local LLM or OCR backend cannot handle Celery's default parallelism
-- open **Settings > Model Config**
-- switch **OCR Engine** away from **Local Tesseract**, or disable OCR auto-switch if you do not want Paperwise to fall back to local OCR
-- use an LLM OCR route instead if you prefer to trade provider calls for lower local CPU load
-
-If a new image was published but your server still looks old:
-
-- run `docker compose pull`
-- then run `docker compose up -d`
-
-If upload works but extraction or Ask My Docs fails:
-
-- open **Settings > Model Config**
-- confirm the required task models are assigned
-- check the API logs for provider timeout or auth errors
-- for Docker plus host-local model servers such as LM Studio, Ollama-compatible gateways, or llama.cpp, use `host.docker.internal` instead of `localhost`
+**Abhishek Sen** — [@abhisheksen777](https://github.com/abhisheksen777)
 
 ## License
 

@@ -6,19 +6,19 @@ import pytest
 from fastapi.testclient import TestClient
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-from paperwise.domain.models import Document, DocumentStatus, LLMParseResult, ParseResult
-from paperwise.infrastructure.config import Settings
-from paperwise.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
-from paperwise.application.services.session_tokens import create_session_token
-from paperwise.infrastructure.storage.local_storage import LocalStorageAdapter
-from paperwise.server.routes import paperless_compat
-from paperwise.server.dependencies import (
+from docupilot.domain.models import Document, DocumentStatus, LLMParseResult, ParseResult
+from docupilot.infrastructure.config import Settings
+from docupilot.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
+from docupilot.application.services.session_tokens import create_session_token
+from docupilot.infrastructure.storage.local_storage import LocalStorageAdapter
+from docupilot.server.routes import paperless_compat
+from docupilot.server.dependencies import (
     document_repository_dependency,
     ingestion_dispatcher_dependency,
     settings_dependency,
     storage_dependency,
 )
-from paperwise.server.main import app
+from docupilot.server.main import app
 
 
 class FakeDispatcher:
@@ -108,14 +108,14 @@ def _paperless_token(client: TestClient, *, email: str = "mobile@example.com") -
     return token_response.json()["token"]
 
 
-@pytest.mark.parametrize("prefix", ["", "/paperwise"])
+@pytest.mark.parametrize("prefix", ["", "/docupilot"])
 def test_mobile_pagination_uses_absolute_urls_and_preserves_query(tmp_path, prefix) -> None:
     repository = InMemoryDocumentRepository()
     storage = LocalStorageAdapter(str(tmp_path))
     app.dependency_overrides[document_repository_dependency] = lambda: repository
     app.dependency_overrides[settings_dependency] = lambda: Settings(object_store_root=str(tmp_path))
     try:
-        client = TestClient(app, base_url=f"https://paperwise.example{prefix}", root_path=prefix)
+        client = TestClient(app, base_url=f"https://docupilot.example{prefix}", root_path=prefix)
         owner_id, headers = _create_user_and_token(client)
         for index in range(105):
             _seed_document(
@@ -133,7 +133,7 @@ def test_mobile_pagination_uses_absolute_urls_and_preserves_query(tmp_path, pref
         assert len(first["results"]) == 100
         assert first["previous"] is None
         url = urlsplit(first["next"])
-        assert (url.scheme, url.netloc, url.path) == ("https", "paperwise.example", f"{prefix}/api/documents/")
+        assert (url.scheme, url.netloc, url.path) == ("https", "docupilot.example", f"{prefix}/api/documents/")
         query = parse_qs(url.query)
         assert query == {"page": ["2"], "page_size": ["100"], "title__icontains": ["Invoice"], "ordering": ["title"], "extra": ["a", "b"]}
         second = client.get(first["next"], headers=headers).json()
@@ -155,7 +155,7 @@ def test_mobile_pagination_uses_trusted_proxy_scheme(tmp_path) -> None:
     app.dependency_overrides[settings_dependency] = lambda: Settings(object_store_root=str(tmp_path))
     try:
         proxy_app = ProxyHeadersMiddleware(app, trusted_hosts=["127.0.0.1"])
-        client = TestClient(proxy_app, base_url="http://paperwise.example", client=("127.0.0.1", 1234))
+        client = TestClient(proxy_app, base_url="http://docupilot.example", client=("127.0.0.1", 1234))
         owner_id, headers = _create_user_and_token(client)
         for index in range(2):
             repository.save(Document(
@@ -164,7 +164,7 @@ def test_mobile_pagination_uses_trusted_proxy_scheme(tmp_path) -> None:
                 status=DocumentStatus.READY, created_at=datetime.now(UTC),
             ))
         response = client.get("/api/documents/?page_size=1", headers={**headers, "X-Forwarded-Proto": "https"})
-        assert response.json()["next"] == "https://paperwise.example/api/documents/?page=2&page_size=1"
+        assert response.json()["next"] == "https://docupilot.example/api/documents/?page=2&page_size=1"
     finally:
         app.dependency_overrides.clear()
 
@@ -383,7 +383,7 @@ def test_paperless_mobile_auth_profile_and_document_listing(tmp_path) -> None:
 
         config = client.get("/api/config/", headers=headers)
         assert config.status_code == 200
-        assert config.json()[0]["app_title"] == "Paperwise"
+        assert config.json()[0]["app_title"] == "DocuPilot"
         assert config.json()[0]["user_args"] is None
 
         tasks = client.get("/api/tasks/?task_name=consume_file&acknowledged=false", headers=headers)

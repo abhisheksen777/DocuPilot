@@ -1,6 +1,6 @@
-# Paperwise Demo Screenshots
+# DocuPilot Demo Screenshots
 
-This document defines reusable public demo scenarios for Paperwise screenshots, website copy, and local product walkthroughs. Keep it updated when the UI changes so screenshots can be regenerated without re-inventing sample data or prompts.
+This document defines reusable public demo scenarios for DocuPilot screenshots, website copy, and local product walkthroughs. Keep it updated when the UI changes so screenshots can be regenerated without re-inventing sample data or prompts.
 
 ## Sample PDFs
 
@@ -51,11 +51,11 @@ The website copies live next to `website/index.html`:
 
 ## Demo Account Treatment
 
-Screenshots should look like a real Paperwise account, but must not expose real user data.
+Screenshots should look like a real DocuPilot account, but must not expose real user data.
 
 Replace visible account identity with:
 
-- Email: `demo@paperwise.app`
+- Email: `demo@docupilot.example.com`
 - Avatar initials: `DM`
 
 Avoid showing:
@@ -261,16 +261,16 @@ Use three fake active jobs:
   - Progress: `12%`
   - File: `application/pdf`
 
-This screenshot is useful for showing that Paperwise exposes OCR and metadata-processing progress without requiring page refreshes.
+This screenshot is useful for showing that DocuPilot exposes OCR and metadata-processing progress without requiring page refreshes.
 
 ## Capture Workflow
 
-1. Log into the local Paperwise app with the local demo or development account.
+1. Log into the local DocuPilot app with the local demo or development account.
 2. Import the PDFs under `samples/pdfs/` if the local account does not already have them.
 3. For the single-document screenshot, open the document created from `samples/pdfs/monetary20251210a1.pdf`.
 4. Navigate to the target page in the running app.
 5. If needed, inject demo labels/counts into the browser DOM only.
-6. Replace visible account identity with `demo@paperwise.app`.
+6. Replace visible account identity with `demo@docupilot.example.com`.
 7. Capture screenshots to `samples/screenshots/`.
    - For website screenshots, keep the viewport at `1440x980` CSS pixels and set `deviceScaleFactor: 2` so the exported PNG is `2880x1960`.
    - If using Playwright, the viewport should be `{ width: 1440, height: 980, deviceScaleFactor: 2 }`.

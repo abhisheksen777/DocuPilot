@@ -1,13 +1,13 @@
 ---
 title: Q&A
-description: Common questions, setup notes, troubleshooting tips, and operating guidance for Paperwise.
+description: Common questions, setup notes, troubleshooting tips, and operating guidance for DocuPilot.
 ---
 
-## How does text extraction and OCR work in Paperwise?
+## How does text extraction and OCR work in DocuPilot?
 
-Paperwise first tries to extract text directly from the document when possible. This works well for machine-readable PDFs and avoids unnecessary OCR.
+DocuPilot first tries to extract text directly from the document when possible. This works well for machine-readable PDFs and avoids unnecessary OCR.
 
-When the file is a scan, image-heavy PDF, or low-quality document, Paperwise falls back to OCR based on the mode you choose in **Settings > Model Config**.
+When the file is a scan, image-heavy PDF, or low-quality document, DocuPilot falls back to OCR based on the mode you choose in **Settings > Model Config**.
 
 ### OCR paths
 
@@ -19,7 +19,7 @@ For OpenAI-based vision OCR, you can also tune image detail to `auto`, `low`, or
 
 ## Which models should I use?
 
-Paperwise works well with both GPT and Gemini setups. Use task-specific models so OCR, extraction, and grounded Q&A are tuned separately.
+DocuPilot works well with both GPT and Gemini setups. Use task-specific models so OCR, extraction, and grounded Q&A are tuned separately.
 
 | Task | GPT example | Gemini example | Notes |
 | --- | --- | --- | --- |
@@ -32,13 +32,13 @@ If your documents are mostly clean text PDFs, start with the faster models and o
 
 ## Why does OCR sometimes time out on dense PDFs?
 
-Large page images can take longer to process. Paperwise logs per-page OCR progress and retries timed-out pages. Longer OCR request timeouts are enabled for vision calls.
+Large page images can take longer to process. DocuPilot logs per-page OCR progress and retries timed-out pages. Longer OCR request timeouts are enabled for vision calls.
 
 ## Why is CPU usage high while processing documents?
 
-Local OCR is the most common cause. When **Local Tesseract** is enabled, Paperwise runs `tesseract` and `pdftoppm` on your machine, which can consume a lot of CPU on scans, image-heavy PDFs, and large batches.
+Local OCR is the most common cause. When **Local Tesseract** is enabled, DocuPilot runs `tesseract` and `pdftoppm` on your machine, which can consume a lot of CPU on scans, image-heavy PDFs, and large batches.
 
-If local CPU usage is a concern, open **Settings > Model Config** and switch **OCR Engine** away from **Local Tesseract**. If OCR auto-switch is enabled, disable it when you do not want Paperwise to fall back to local OCR after direct text extraction looks weak. You can use an LLM OCR route instead if you prefer to trade provider calls for lower local CPU load.
+If local CPU usage is a concern, open **Settings > Model Config** and switch **OCR Engine** away from **Local Tesseract**. If OCR auto-switch is enabled, disable it when you do not want DocuPilot to fall back to local OCR after direct text extraction looks weak. You can use an LLM OCR route instead if you prefer to trade provider calls for lower local CPU load.
 
 ## How are duplicate files handled?
 
@@ -48,4 +48,4 @@ Documents are deduplicated by SHA256 checksum to prevent repeated ingestion of t
 
 Open an issue in the repository:
 
-- [github.com/zellux/paperwise](https://github.com/zellux/paperwise)
+- [github.com/abhisheksen777/DocuPilot](https://github.com/abhisheksen777/DocuPilot)

@@ -1,6 +1,6 @@
 ---
 title: Dev Environment Setup
-description: Commands and workflow notes for running Paperwise from source.
+description: Commands and workflow notes for running DocuPilot from source.
 ---
 
 ## Core commands
@@ -30,8 +30,8 @@ description: Commands and workflow notes for running Paperwise from source.
 By default, local config uses in-memory storage. To persist data in Postgres, set:
 
 ```bash
-PAPERWISE_REPOSITORY_BACKEND=postgres
-PAPERWISE_POSTGRES_URL=postgresql+psycopg://paperwise:paperwise@localhost:5432/paperwise
+DOCUPILOT_REPOSITORY_BACKEND=postgres
+DOCUPILOT_POSTGRES_URL=postgresql+psycopg://docupilot:docupilot@localhost:5432/docupilot
 ```
 
 Then run `make deps-up` and restart the backend.

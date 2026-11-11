@@ -1,0 +1,40 @@
+from functools import lru_cache
+
+from pydantic import Field, PositiveInt, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=(".env.local", ".env"),
+        env_prefix="DOCUPILOT_",
+        extra="ignore",
+    )
+
+    env: str = "local"
+    log_level: str = "INFO"
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
+    redis_url: str = "redis://localhost:6379/0"
+    repository_backend: str = "memory"
+    postgres_url: str = "postgresql+psycopg://docupilot:docupilot@localhost:5432/docupilot"
+    object_store_root: str = "local/object-store"
+    llm_debug_log_path: str = "local/logs/llm-debug.log"
+    llm_debug_log_max_bytes: int = 100 * 1024 * 1024
+    llm_request_timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    auth_secret: str = "docupilot-dev-secret-change-me"
+    session_ttl_seconds: int = 60 * 60 * 12
+    session_cookie_secure: bool | None = None
+    disable_signup: bool = False
+    worker_concurrency: PositiveInt | None = None
+
+    @field_validator("llm_request_timeout_seconds", mode="before")
+    @classmethod
+    def empty_llm_timeout_uses_defaults(cls, value):
+        # Compose can forward an unset optional environment variable as an empty string.
+        return None if isinstance(value, str) and not value.strip() else value
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

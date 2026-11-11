@@ -3,10 +3,10 @@ import json
 import httpx
 import pytest
 
-from paperwise.infrastructure.llm.json_results import LLMResponseFormatError
-from paperwise.infrastructure.llm.metadata_prompt import extract_metadata_result
-from paperwise.infrastructure.llm.ocr_prompt import extract_ocr_text_result
-from paperwise.infrastructure.llm.openai_llm_provider import OpenAILLMProvider
+from docupilot.infrastructure.llm.json_results import LLMResponseFormatError
+from docupilot.infrastructure.llm.metadata_prompt import extract_metadata_result
+from docupilot.infrastructure.llm.ocr_prompt import extract_ocr_text_result
+from docupilot.infrastructure.llm.openai_llm_provider import OpenAILLMProvider
 
 
 @pytest.mark.parametrize("extract", [extract_metadata_result, extract_ocr_text_result])

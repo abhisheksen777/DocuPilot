@@ -1,7 +1,7 @@
 import json
 
-from paperwise.application.services.file_relocation import move_blob_to_processed
-from paperwise.application.services.storage_paths import path_to_blob_ref
+from docupilot.application.services.file_relocation import move_blob_to_processed
+from docupilot.application.services.storage_paths import path_to_blob_ref
 
 
 def test_move_blob_to_processed_truncates_for_metadata_sidecar(tmp_path) -> None:

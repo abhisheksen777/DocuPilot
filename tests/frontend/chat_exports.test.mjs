@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { answerExportText, rowsToCsv } from "../../src/paperwise/server/static/js/chat/exports.js";
-import { scopeLabel } from "../../src/paperwise/server/static/js/chat/scope.js";
+import { answerExportText, rowsToCsv } from "../../src/docupilot/server/static/js/chat/exports.js";
+import { scopeLabel } from "../../src/docupilot/server/static/js/chat/scope.js";
 
 test("CSV preserves quotes and multiline evidence and escapes spreadsheet formulas", () => {
   assert.equal(rowsToCsv([["A,B", 'He said "yes"', "line 1\nline 2", "=SUM(A1)", "+cmd", "@cmd", "正常"]]),

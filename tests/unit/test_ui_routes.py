@@ -5,7 +5,7 @@ import re
 
 from fastapi.testclient import TestClient
 
-from paperwise.domain.models import (
+from docupilot.domain.models import (
     ChatThread,
     Document,
     DocumentHistoryEvent,
@@ -16,11 +16,11 @@ from paperwise.domain.models import (
     ParseResult,
     UserPreference,
 )
-from paperwise.infrastructure.config import Settings
-from paperwise.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
-from paperwise.server.dependencies import document_repository_dependency, settings_dependency
-from paperwise.server.main import app
-from paperwise.server.ui.fragments import (
+from docupilot.infrastructure.config import Settings
+from docupilot.infrastructure.repositories.in_memory_document_repository import InMemoryDocumentRepository
+from docupilot.server.dependencies import document_repository_dependency, settings_dependency
+from docupilot.server.main import app
+from docupilot.server.ui.fragments import (
     _initials,
     document_detail_fragments,
     document_rows_html,
@@ -28,13 +28,13 @@ from paperwise.server.ui.fragments import (
     document_sidebar_document_types_html,
     document_sidebar_tags_html,
 )
-from paperwise.server.ui.page import find_template_placeholders
-from paperwise.server.ui.tag_colors import TAG_COLOR_SET, stable_tag_color
+from docupilot.server.ui.page import find_template_placeholders
+from docupilot.server.ui.tag_colors import TAG_COLOR_SET, stable_tag_color
 
 
 def _initial_data_from_response(html: str) -> dict:
     match = re.search(
-        r'<script id="paperwiseInitialData" type="application/json">(.+?)</script>',
+        r'<script id="docupilotInitialData" type="application/json">(.+?)</script>',
         html,
     )
     assert match is not None
@@ -53,7 +53,7 @@ def test_document_rows_render_expandable_tag_overflow() -> None:
                 "llm_metadata": {
                     "suggested_title": "Many Tags",
                     "document_date": "2026-05-12",
-                    "correspondent": "Paperwise",
+                    "correspondent": "DocuPilot",
                     "document_type": "Notice",
                     "tags": ["One", "Two", "Three", "Four", "Five"],
                 },
@@ -343,7 +343,7 @@ def test_ui_initials_are_dash_and_underscore_aware() -> None:
 
 
 def test_tag_color_palette_is_shared_with_static_helper() -> None:
-    tag_color_js = Path("src/paperwise/server/static/js/ui/tagColor.js").read_text()
+    tag_color_js = Path("src/docupilot/server/static/js/ui/tagColor.js").read_text()
     fallback_palette_match = re.search(
         r"const FALLBACK_TAG_COLOR_SET = \[(.*?)\];",
         tag_color_js,
@@ -389,7 +389,7 @@ def _save_ready_document(
             document_id=doc_id,
             suggested_title=title,
             document_date="2026-05-02",
-            correspondent="Paperwise",
+            correspondent="DocuPilot",
             document_type=document_type,
             tags=tags,
             created_correspondent=False,
@@ -554,7 +554,7 @@ def test_ui_routes_serve_page_html() -> None:
 
 
 def test_ui_html_is_split_into_layout_and_partials() -> None:
-    server_dir = Path(__file__).resolve().parents[2] / "src" / "paperwise" / "server"
+    server_dir = Path(__file__).resolve().parents[2] / "src" / "docupilot" / "server"
     partials_dir = server_dir / "templates" / "ui" / "partials"
 
     assert (server_dir / "templates" / "ui" / "layout.html").exists()
@@ -664,8 +664,8 @@ def test_ui_routes_load_page_specific_scripts() -> None:
     for path, module_name in expected_modules.items():
         html = client.get(path).text
         assert '<script type="importmap">' in html
-        assert '"paperwise/app": "/static/js/app.js?v=' in html
-        assert '"paperwise/shared": "/static/js/shared.js?v=' in html
+        assert '"docupilot/app": "/static/js/app.js?v=' in html
+        assert '"docupilot/shared": "/static/js/shared.js?v=' in html
         assert f'pageModuleName: "{module_name}"' in html
     assert 'pageModuleName: "pending.js"' not in client.get("/ui/documents").text
 
@@ -872,7 +872,7 @@ def test_static_assets_do_not_keep_page_selection_logic() -> None:
         script = client.get(f"/static/js/{script_name}")
         assert script.status_code == 200
         assert "export async function initializePage" in script.text
-        assert "window.initializePaperwisePage" not in script.text
+        assert "window.initializeDocuPilotPage" not in script.text
 
     for script_name in [
         "documents.js",
@@ -1408,11 +1408,11 @@ def test_catalog_ui_pages_include_initial_data_for_cookie_session() -> None:
             {"document_type": "Notice", "document_count": 1},
         ]
         assert documents_payload["document_sidebar_correspondents"] == [
-            {"correspondent": "Paperwise", "document_count": 2}
+            {"correspondent": "DocuPilot", "document_count": 2}
         ]
         assert documents_payload["document_filter_options"] == {
             "tags": ["Finance", "Tax"],
-            "correspondents": ["Paperwise"],
+            "correspondents": ["DocuPilot"],
             "document_types": ["Invoice", "Notice"],
         }
         assert documents_payload["user_preferences"]["llm_total_tokens_processed"] == 42
@@ -1441,14 +1441,14 @@ def test_catalog_ui_pages_include_initial_data_for_cookie_session() -> None:
         assert '<span>Finance</span>' in documents_html
         assert '<span class="docs-side-count">2</span>' in documents_html
         assert (
-            '<a class="docs-side-row docs-corr-row" href="/ui/documents?correspondent=Paperwise">'
+            '<a class="docs-side-row docs-corr-row" href="/ui/documents?correspondent=DocuPilot">'
             in documents_html
         )
         assert documents_html.index(">Tags<") < documents_html.index(">Document Types<")
         assert documents_html.index(">Document Types<") < documents_html.index(">Correspondents<")
         assert documents_html.index('id="filterTag"') < documents_html.index('id="filterType"')
         assert documents_html.index('id="filterType"') < documents_html.index('id="filterCorrespondent"')
-        assert '<a class="corr-link" href="/ui/documents?correspondent=Paperwise">Paperwise</a>' in documents_html
+        assert '<a class="corr-link" href="/ui/documents?correspondent=DocuPilot">DocuPilot</a>' in documents_html
         assert '<a class="tag-pill" href="/ui/documents?tag=Tax" style="--tag-color: ' in documents_html
         assert '<a class="tag-pill" href="/ui/documents?tag=Finance" style="--tag-color: ' in documents_html
         assert 'data-tags-expand=' not in documents_html

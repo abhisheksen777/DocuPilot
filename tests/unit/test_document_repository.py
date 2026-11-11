@@ -2,8 +2,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 import sqlite3
 
-from paperwise.application.services.chunk_indexing import index_document_chunks
-from paperwise.domain.models import (
+from docupilot.application.services.chunk_indexing import index_document_chunks
+from docupilot.domain.models import (
     ChatThread,
     Document,
     DocumentIndexStatus,
@@ -11,13 +11,13 @@ from paperwise.domain.models import (
     LLMParseResult,
     ParseResult,
 )
-from paperwise.infrastructure.repositories.in_memory_document_repository import (
+from docupilot.infrastructure.repositories.in_memory_document_repository import (
     InMemoryDocumentRepository,
 )
-from paperwise.infrastructure.repositories.postgres_document_repository import (
+from docupilot.infrastructure.repositories.postgres_document_repository import (
     PostgresDocumentRepository,
 )
-from paperwise.infrastructure.repositories.postgres_document_mapper import coerce_document_status
+from docupilot.infrastructure.repositories.postgres_document_mapper import coerce_document_status
 
 
 def _document(document_id: str, owner_id: str) -> Document:
@@ -133,7 +133,7 @@ def test_owner_taxonomy_stats_are_scoped_to_document_owner() -> None:
 
 
 def test_postgres_owner_taxonomy_stats_are_scoped_to_document_owner(tmp_path: Path) -> None:
-    repository = PostgresDocumentRepository(f"sqlite:///{tmp_path / 'paperwise.db'}")
+    repository = PostgresDocumentRepository(f"sqlite:///{tmp_path / 'docupilot.db'}")
     repository.save(_document("owner-a-1", "owner-a"))
     repository.save(_document("owner-a-2", "owner-a"))
     repository.save(_document("owner-b-1", "owner-b"))
@@ -202,7 +202,7 @@ def test_list_owner_documents_with_search_results_includes_parse_text() -> None:
 
 
 def test_postgres_list_owner_documents_with_search_results_includes_parse_text(tmp_path: Path) -> None:
-    repository = PostgresDocumentRepository(f"sqlite:///{tmp_path / 'paperwise.db'}")
+    repository = PostgresDocumentRepository(f"sqlite:///{tmp_path / 'docupilot.db'}")
     repository.save(_document("owner-a-ready", "owner-a"))
     repository.save(_document("owner-b-ready", "owner-b"))
     repository.save_parse_result(_parse_result("owner-a-ready", "Parsed text with a xenolith marker."))
@@ -235,7 +235,7 @@ def test_postgres_document_mapper_preserves_failed_status() -> None:
 
 
 def test_postgres_repository_round_trips_failed_status(tmp_path: Path) -> None:
-    repository = PostgresDocumentRepository(f"sqlite:///{tmp_path / 'paperwise.db'}")
+    repository = PostgresDocumentRepository(f"sqlite:///{tmp_path / 'docupilot.db'}")
     repository.save(_failed_document("owner-a-failed", "owner-a"))
 
     loaded = repository.get("owner-a-failed")
@@ -245,7 +245,7 @@ def test_postgres_repository_round_trips_failed_status(tmp_path: Path) -> None:
 
 
 def test_postgres_repository_adds_starred_column_to_existing_documents_table(tmp_path: Path) -> None:
-    db_path = tmp_path / "paperwise-existing.db"
+    db_path = tmp_path / "docupilot-existing.db"
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             """
@@ -275,7 +275,7 @@ def test_postgres_repository_adds_starred_column_to_existing_documents_table(tmp
 
 
 def test_postgres_repository_adds_full_text_column_to_existing_parse_results_table(tmp_path: Path) -> None:
-    db_path = tmp_path / "paperwise-existing-parse.db"
+    db_path = tmp_path / "docupilot-existing-parse.db"
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             """
@@ -303,7 +303,7 @@ def test_postgres_repository_adds_full_text_column_to_existing_parse_results_tab
 
 
 def test_postgres_repository_indexes_chat_thread_document_references(tmp_path: Path) -> None:
-    repository = PostgresDocumentRepository(f"sqlite:///{tmp_path / 'paperwise.db'}")
+    repository = PostgresDocumentRepository(f"sqlite:///{tmp_path / 'docupilot.db'}")
     thread = _chat_thread("thread-tax", "owner-a", "doc-tax")
     repository.save_chat_thread(thread)
 
@@ -366,7 +366,7 @@ def test_index_document_chunks_prefers_full_text_over_preview() -> None:
 
 
 def test_postgres_repository_round_trips_index_state_and_deletes_it(tmp_path: Path) -> None:
-    repository = PostgresDocumentRepository(f"sqlite:///{tmp_path / 'paperwise.db'}")
+    repository = PostgresDocumentRepository(f"sqlite:///{tmp_path / 'docupilot.db'}")
     document = _document("indexed-doc", "owner-a")
     repository.save(document)
     repository.save_parse_result(_parse_result(document.id, "alpha beta gamma"))

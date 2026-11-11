@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from paperwise.server.main import app
+from docupilot.server.main import app
 
 
 def test_healthz() -> None:

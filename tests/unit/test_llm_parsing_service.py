@@ -2,13 +2,13 @@ from datetime import UTC, datetime
 
 import httpx
 
-from paperwise.application.services.llm_parsing import parse_with_llm
-from paperwise.application.services.history import build_processing_completed_history_event
-from paperwise.application.services.metadata_updates import validate_document_date
-from paperwise.domain.models import Document, DocumentStatus, HistoryActorType, ParseResult
-from paperwise.infrastructure.llm.json_results import LLMResponseFormatError
-from paperwise.infrastructure.llm.metadata_prompt import extract_metadata_result
-from paperwise.infrastructure.repositories.in_memory_document_repository import (
+from docupilot.application.services.llm_parsing import parse_with_llm
+from docupilot.application.services.history import build_processing_completed_history_event
+from docupilot.application.services.metadata_updates import validate_document_date
+from docupilot.domain.models import Document, DocumentStatus, HistoryActorType, ParseResult
+from docupilot.infrastructure.llm.json_results import LLMResponseFormatError
+from docupilot.infrastructure.llm.metadata_prompt import extract_metadata_result
+from docupilot.infrastructure.repositories.in_memory_document_repository import (
     InMemoryDocumentRepository,
 )
 

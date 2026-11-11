@@ -1,15 +1,15 @@
 from datetime import UTC, datetime
 
-from paperwise.domain.models import Document, DocumentStatus, LLMParseResult, ParseResult, UserPreference
-from paperwise.infrastructure.repositories.in_memory_document_repository import (
+from docupilot.domain.models import Document, DocumentStatus, LLMParseResult, ParseResult, UserPreference
+from docupilot.infrastructure.repositories.in_memory_document_repository import (
     InMemoryDocumentRepository,
 )
-from paperwise.application.services.ocr_preferences import (
+from docupilot.application.services.ocr_preferences import (
     resolve_owner_ocr_auto_switch,
     resolve_owner_ocr_provider,
 )
-from paperwise.application.services import document_pipeline
-from paperwise.workers import tasks as worker_tasks
+from docupilot.application.services import document_pipeline
+from docupilot.workers import tasks as worker_tasks
 
 
 class FailingMetadataProvider:
